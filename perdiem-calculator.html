@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Per Diem Calculator</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1a2e;
+    --ink-light: #4a4a6a;
+    --rule: #d0d0e0;
+    --bg: #f7f7fb;
+    --white: #ffffff;
+    --accent: #2d5be3;
+    --accent-light: #e8edfb;
+    --green: #1a7a4a;
+    --green-light: #e6f4ed;
+    --warn: #b85c00;
+    --warn-light: #fdf0e6;
+    --red-light: #fdecea;
+    --red: #c0392b;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── SCREEN LAYOUT ── */
+  .screen-only { }
+  .print-only { display: none; }
+
+  header {
+    background: var(--ink);
+    color: white;
+    padding: 20px 32px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  header span {
+    font-size: 12px;
+    opacity: 0.5;
+    font-family: var(--mono);
+  }
+
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 28px 24px 60px;
+  }
+
+  .section {
+    background: var(--white);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+
+  .section-head {
+    background: var(--ink);
+    color: white;
+    padding: 9px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .section-body {
+    padding: 20px 20px;
+  }
+
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 20px;
+  }
+  .field-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+  .field-grid.full { grid-template-columns: 1fr; }
+
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+  }
+  .field input, .field select, .field textarea {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--white);
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+  .field input:focus, .field select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .field textarea { resize: vertical; min-height: 56px; }
+
+  .rate-display {
+    background: var(--accent-light);
+    border: 1px solid #c0cef5;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .rate-display .rate-val {
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .rate-display .rate-label { color: var(--ink-light); font-size: 11px; }
+
+  /* Day table */
+  .day-table { width: 100%; border-collapse: collapse; }
+  .day-table th {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+    border-bottom: 2px solid var(--rule);
+    padding: 6px 10px;
+    text-align: left;
+    background: var(--bg);
+  }
+  .day-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: middle;
+  }
+  .day-table tr:last-child td { border-bottom: none; }
+  .day-table tr:hover td { background: #f9f9fd; }
+
+  .day-table td.date-cell { font-family: var(--mono); font-size: 12px; color: var(--ink-light); }
+  .day-table td.type-cell select {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: var(--sans);
+    background: white;
+    width: 100%;
+  }
+  .day-table td.meals-cell {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .meal-check {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--ink-light);
+    white-space: nowrap;
+  }
+  .meal-check input[type=checkbox] { cursor: pointer; }
+  .meal-check.checked { color: var(--red); }
+
+  .day-table td.amount-cell {
+    font-family: var(--mono);
+    font-size: 13px;
+    text-align: right;
+    font-weight: 500;
+  }
+  .amount-cell.reduced { color: var(--warn); }
+  .amount-cell.zero { color: var(--red); }
+
+  .travel-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .tag-travel { background: var(--warn-light); color: var(--warn); }
+  .tag-full { background: var(--green-light); color: var(--green); }
+
+  /* Totals */
+  .totals-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .total-card {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 14px 16px;
+    background: var(--bg);
+  }
+  .total-card.highlight {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .total-card .tc-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+    margin-bottom: 4px;
+  }
+  .total-card.highlight .tc-label { color: rgba(255,255,255,0.7); }
+  .total-card .tc-val {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 500;
+  }
+  .total-card.highlight .tc-val { color: white; }
+
+  /* Buttons */
+  .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+  .btn {
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-ghost { background: transparent; border: 1px solid var(--rule); color: var(--ink); }
+
+  .note {
+    font-size: 11px;
+    color: var(--ink-light);
+    margin-top: 10px;
+    line-height: 1.6;
+  }
+  .note a { color: var(--accent); }
+
+  /* ── PRINT STYLES ── */
+  @media print {
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+    body { background: white; font-size: 12px; }
+    header, .screen-only, .btn-row, .note { display: none !important; }
+    .print-only { display: block !important; }
+    .container { padding: 0; max-width: 100%; }
+    .section { border: 1px solid #ccc; margin-bottom: 12px; page-break-inside: avoid; }
+
+    .print-header {
+      display: flex !important;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--ink);
+    }
+    .print-header h1 { font-size: 20px; font-weight: 600; }
+    .print-header .org { font-size: 12px; color: var(--ink-light); margin-top: 2px; }
+    .print-header .print-date { font-family: var(--mono); font-size: 11px; color: var(--ink-light); text-align: right; }
+
+    .totals-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .total-card.highlight { background: var(--ink) !important; }
+
+    .sig-label { font-size: 10px; color: var(--ink-light); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+
+    #notesField.notes-empty { display: none !important; }
+
+    .field input, .field select, .field textarea { border: none; padding: 0; }
+    .day-table td.type-cell select { border: none; padding: 0; appearance: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="screen-only">
+  <h1>Per Diem Calculator</h1>
+  <span>GSA CONUS Rates · Reimbursement rates last updated October 1, 2025</span>
+</header>
+
+<div class="container">
+
+  <!-- Print header (hidden on screen) -->
+  <div class="print-only print-header" style="display:none">
+    <div>
+      <h1>Per Diem Reimbursement Request</h1>
+      <div class="org">Jerome Foundation</div>
+    </div>
+    <div class="print-date" id="printDateDisplay"></div>
+  </div>
+
+  <!-- SECTION 1: Employee & Trip Info -->
+  <div class="section">
+    <div class="section-head">Employee &amp; Trip Information</div>
+    <div class="section-body">
+      <div class="field-grid">
+        <div class="field">
+          <label>Employee Name</label>
+          <input type="text" id="empName" placeholder="Full name">
+        </div>
+        <div class="field">
+          <label>Trip Purpose</label>
+          <input type="text" id="tripPurpose" placeholder="Conference, site visit, etc.">
+        </div>
+        <div class="field">
+          <label>Departure Date</label>
+          <input type="date" id="startDate">
+        </div>
+        <div class="field">
+          <label>Departure Time</label>
+          <input type="time" id="startTime" value="08:00" onchange="rebuildDays()">
+        </div>
+        <div class="field">
+          <label>Return Date</label>
+          <input type="date" id="endDate">
+          <span id="dateError" style="display:none; color: var(--red); font-size: 12px; font-weight: 500; margin-top: 2px;">⚠ Return date must be on or after the departure date.</span>
+        </div>
+        <div class="field">
+          <label>Return Time</label>
+          <input type="time" id="endTime" value="18:00" onchange="rebuildDays()">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: Location & Rate -->
+  <div class="section">
+    <div class="section-head">Destination &amp; Per Diem Rate</div>
+    <div class="section-body">
+      <div class="field-grid three" style="margin-bottom: 16px;">
+        <div class="field">
+          <label>Destination</label>
+          <select id="locationPreset" onchange="handleLocationPreset()">
+            <option value="">— select —</option>
+            <option value="nyc">New York City, NY</option>
+            <option value="mn">Minnesota (standard)</option>
+            <option value="other">Other U.S. location</option>
+          </select>
+        </div>
+        <div class="field" id="otherCityField" style="display:none">
+          <label>City, State</label>
+          <input type="text" id="otherCity" placeholder="e.g. Chicago, IL or Memphis, TN" oninput="lookupOtherCity()">
+        </div>
+      </div>
+
+      <div id="rateDisplay" style="display:none; margin-bottom: 14px;">
+        <div class="rate-display">
+          <div>
+            <div class="rate-label">M&amp;IE DAILY RATE</div>
+            <div class="rate-val" id="rateVal">—</div>
+          </div>
+          <div style="margin-left:16px; color: var(--ink-light); font-size: 12px;" id="rateSource"></div>
+        </div>
+        <p class="note" style="margin-top: 7px;">Verify or look up any rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>.</p>
+      </div>
+
+      <div id="manualRateField" style="display:none">
+        <div class="field" style="max-width: 200px;">
+          <label>Enter M&amp;IE Rate Manually ($)</label>
+          <input type="number" id="manualRate" placeholder="68.00" step="0.01" oninput="applyManualRate()">
+        </div>
+        <p class="note" style="margin-top:8px;">
+          Location not found in table. Look up the rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter it above.
+        </p>
+      </div>
+
+      <div id="lookupNote" style="display:none">
+        <p class="note" id="lookupNoteText"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3: Daily Breakdown -->
+  <div class="section" id="dailySection" style="display:none">
+    <div class="section-head">Daily Breakdown</div>
+    <div class="section-body screen-only" style="padding: 12px 20px 0; border-bottom: 1px solid var(--rule);">
+      <div style="background: var(--accent-light); border: 1px solid #c0cef5; border-radius: 4px; padding: 11px 14px; font-size: 12px; line-height: 1.6; color: var(--ink-light);">
+        <strong style="color: var(--ink);">How to use the checkboxes:</strong> Check a meal to exclude it from your reimbursement — only mark meals that were provided to you during your actual travel window (after your departure time on the first day, before your return time on the last day). Examples: a conference lunch, a hosted dinner, or a meal included in a registration fee. The tool automatically calculates the deduction using GSA meal values. The first and last days of travel are reimbursed at 75% of the daily rate. Meals shown in gray are outside your travel window and cannot be claimed.
+      </div>
+    </div>
+    <div class="section-body" style="padding: 0;">
+      <table class="day-table" id="dayTable">
+        <thead>
+          <tr>
+            <th style="width:110px">Date</th>
+            <th style="width:155px">Day Type</th>
+            <th>Meals Provided <span class="screen-only" style="font-weight:400; font-size:10px; color: var(--ink-light);">(check to exclude from reimbursement)</span></th>
+            <th style="width:90px; text-align:right">Amount</th>
+          </tr>
+        </thead>
+        <tbody id="dayTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 4: Totals -->
+  <div class="section" id="totalsSection" style="display:none">
+    <div class="section-head">Summary</div>
+    <div class="section-body">
+      <div class="totals-grid">
+        <div class="total-card">
+          <div class="tc-label">Meals Reimbursable</div>
+          <div class="tc-val" id="totalMeals">$0.00</div>
+        </div>
+        <div class="total-card">
+          <div class="tc-label">Incidentals</div>
+          <div class="tc-val" id="totalIncidentals">$0.00</div>
+        </div>
+        <div class="total-card highlight">
+          <div class="tc-label">Total Reimbursement</div>
+          <div class="tc-val" id="totalReimb">$0.00</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px;" class="field" id="notesField">
+        <label>Notes / Additional Context</label>
+        <textarea id="notes" placeholder="Optional — conference name, approval notes, etc." oninput="toggleNotesprint()"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="btn-row screen-only" id="printBtn" style="display:none">
+    <button class="btn btn-primary" onclick="printReport()">Print / Save as PDF</button>
+    <button class="btn btn-ghost" onclick="resetForm()">Start Over</button>
+  </div>
+
+  <p class="note screen-only" id="printNote" style="display:none">
+    To save as PDF: choose <strong>Print</strong>, then select <strong>"Save as PDF"</strong> as your printer (or use File → Print in your browser). The report will format cleanly for upload to Divvy.
+  </p>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// GSA FY 2026 CONUS M&IE RATES
+// Standard rate: $68. NYC/high-cost areas listed below.
+// Rates held at FY 2025 levels per GSA Bulletin FTR 26-01.
+// Update this table each October when new rates are published.
+// Source: gsa.gov/perdiem
+// ─────────────────────────────────────────────
+const RATE_TABLE = [
+  // [city keywords, state, mie_rate, display_name]
+  // New York
+  ["new york", "ny", 92, "New York City, NY"],
+  ["manhattan", "ny", 92, "New York City (Manhattan), NY"],
+  ["brooklyn", "ny", 92, "New York City (Brooklyn), NY"],
+  ["bronx", "ny", 92, "New York City (Bronx), NY"],
+  ["queens", "ny", 92, "New York City (Queens), NY"],
+  ["staten island", "ny", 92, "New York City (Staten Island), NY"],
+  // California
+  ["los angeles", "ca", 84, "Los Angeles, CA"],
+  ["san francisco", "ca", 92, "San Francisco, CA"],
+  ["san jose", "ca", 84, "San Jose, CA"],
+  ["san diego", "ca", 80, "San Diego, CA"],
+  ["oakland", "ca", 92, "Oakland, CA"],
+  ["santa barbara", "ca", 80, "Santa Barbara, CA"],
+  ["monterey", "ca", 80, "Monterey, CA"],
+  ["napa", "ca", 80, "Napa, CA"],
+  ["sacramento", "ca", 72, "Sacramento, CA"],
+  // DC area
+  ["washington", "dc", 92, "Washington, DC"],
+  ["arlington", "va", 92, "Arlington, VA"],
+  ["alexandria", "va", 92, "Alexandria, VA"],
+  ["bethesda", "md", 92, "Bethesda, MD"],
+  // Illinois
+  ["chicago", "il", 84, "Chicago, IL"],
+  // Massachusetts
+  ["boston", "ma", 84, "Boston, MA"],
+  ["cambridge", "ma", 84, "Cambridge, MA"],
+  // Colorado
+  ["denver", "co", 76, "Denver, CO"],
+  ["aspen", "co", 80, "Aspen, CO"],
+  ["boulder", "co", 76, "Boulder, CO"],
+  ["vail", "co", 80, "Vail, CO"],
+  // Texas
+  ["austin", "tx", 76, "Austin, TX"],
+  ["dallas", "tx", 72, "Dallas, TX"],
+  ["houston", "tx", 72, "Houston, TX"],
+  // Florida
+  ["miami", "fl", 80, "Miami, FL"],
+  ["orlando", "fl", 72, "Orlando, FL"],
+  ["fort lauderdale", "fl", 80, "Fort Lauderdale, FL"],
+  ["key west", "fl", 80, "Key West, FL"],
+  ["naples", "fl", 76, "Naples, FL"],
+  // Washington State
+  ["seattle", "wa", 84, "Seattle, WA"],
+  // Nevada
+  ["las vegas", "nv", 72, "Las Vegas, NV"],
+  // Oregon
+  ["portland", "or", 76, "Portland, OR"],
+  // Arizona
+  ["phoenix", "az", 72, "Phoenix, AZ"],
+  ["scottsdale", "az", 76, "Scottsdale, AZ"],
+  ["sedona", "az", 76, "Sedona, AZ"],
+  // Georgia
+  ["atlanta", "ga", 72, "Atlanta, GA"],
+  // Tennessee
+  ["nashville", "tn", 72, "Nashville, TN"],
+  ["memphis", "tn", 68, "Memphis, TN"],
+  ["knoxville", "tn", 68, "Knoxville, TN"],
+  // Pennsylvania
+  ["philadelphia", "pa", 76, "Philadelphia, PA"],
+  ["pittsburgh", "pa", 72, "Pittsburgh, PA"],
+  // Ohio
+  ["columbus", "oh", 68, "Columbus, OH"],
+  ["cleveland", "oh", 68, "Cleveland, OH"],
+  // Michigan
+  ["detroit", "mi", 68, "Detroit, MI"],
+  // North Carolina
+  ["charlotte", "nc", 68, "Charlotte, NC"],
+  ["raleigh", "nc", 72, "Raleigh, NC"],
+  // Virginia
+  ["richmond", "va", 72, "Richmond, VA"],
+  ["norfolk", "va", 72, "Norfolk, VA"],
+  // Maryland
+  ["baltimore", "md", 72, "Baltimore, MD"],
+  ["annapolis", "md", 76, "Annapolis, MD"],
+  // Louisiana
+  ["new orleans", "la", 72, "New Orleans, LA"],
+  // Missouri
+  ["kansas city", "mo", 68, "Kansas City, MO"],
+  ["st. louis", "mo", 68, "St. Louis, MO"],
+  // Minnesota — standard CONUS (no NSA designation)
+  ["minneapolis", "mn", 68, "Minneapolis, MN"],
+  ["st. paul", "mn", 68, "St. Paul, MN"],
+  ["duluth", "mn", 68, "Duluth, MN"],
+  // Wisconsin
+  ["milwaukee", "wi", 68, "Milwaukee, WI"],
+  ["madison", "wi", 68, "Madison, WI"],
+  // Utah
+  ["salt lake city", "ut", 72, "Salt Lake City, UT"],
+  ["park city", "ut", 80, "Park City, UT"],
+  // Hawaii (DoD rates — approximate; verify at gsa.gov)
+  ["honolulu", "hi", 88, "Honolulu, HI"],
+  // New Mexico
+  ["santa fe", "nm", 76, "Santa Fe, NM"],
+  ["albuquerque", "nm", 68, "Albuquerque, NM"],
+  // Idaho
+  ["sun valley", "id", 80, "Sun Valley, ID"],
+  ["boise", "id", 68, "Boise, ID"],
+  // Montana
+  ["bozeman", "mt", 72, "Bozeman, MT"],
+  // Wyoming
+  ["jackson", "wy", 80, "Jackson, WY"],
+];
+
+// GSA FY 2026 exact M&IE meal dollar breakdowns by rate tier
+// Source: GSA official per diem data, verified against gsa.gov
+// Update each October when new rates are published.
+const MIE_BREAKDOWN = {
+  68: { breakfast: 16, lunch: 19, dinner: 28, incidentals: 5 },
+  74: { breakfast: 18, lunch: 20, dinner: 31, incidentals: 5 },
+  80: { breakfast: 20, lunch: 22, dinner: 33, incidentals: 5 },
+  86: { breakfast: 22, lunch: 23, dinner: 36, incidentals: 5 },
+  92: { breakfast: 23, lunch: 26, dinner: 38, incidentals: 5 },
+};
+
+function getMealBreakdown(mie) {
+  // Use exact tier if available, otherwise calculate proportionally
+  if (MIE_BREAKDOWN[mie]) return MIE_BREAKDOWN[mie];
+  // Fallback for manually-entered rates: proportional with flat $5 incidentals
+  const meals = mie - 5;
+  return {
+    breakfast: Math.round(meals * 0.1818),  // ~16/88 of meal total
+    lunch:     Math.round(meals * 0.2727),  // ~24/88
+    dinner:    Math.round(meals * 0.4545),  // ~40/88
+    incidentals: 5
+  };
+}
+
+// NYC preset M&IE
+const NYC_RATE = 92;
+const MN_RATE = 68;
+const STANDARD_RATE = 68;
+
+let currentMIE = 0;
+let days = [];
+
+function fmt(n) {
+  return '$' + n.toFixed(2);
+}
+
+function handleLocationPreset() {
+  const val = document.getElementById('locationPreset').value;
+  document.getElementById('otherCityField').style.display = 'none';
+  document.getElementById('manualRateField').style.display = 'none';
+  document.getElementById('lookupNote').style.display = 'none';
+
+  if (val === 'nyc') {
+    setRate(NYC_RATE, 'New York City, NY — NSA rate');
+  } else if (val === 'mn') {
+    setRate(MN_RATE, 'Minnesota — standard CONUS rate');
+  } else if (val === 'other') {
+    document.getElementById('otherCityField').style.display = '';
+    document.getElementById('rateDisplay').style.display = 'none';
+    document.getElementById('lookupNote').style.display = '';
+    document.getElementById('lookupNoteText').textContent = 'Enter city and state to look up the rate.';
+    currentMIE = 0;
+  } else {
+    document.getElementById('rateDisplay').style.display = 'none';
+    currentMIE = 0;
+  }
+  rebuildDays();
+}
+
+function lookupOtherCity() {
+  const raw = (document.getElementById('otherCity').value || '').trim();
+  if (!raw || raw.length < 2) return;
+
+  // Parse "City, ST" or "City ST" or just "City"
+  const lower = raw.toLowerCase();
+  let cityPart = lower;
+  let statePart = '';
+  const commaIdx = lower.lastIndexOf(',');
+  if (commaIdx > -1) {
+    cityPart = lower.slice(0, commaIdx).trim();
+    statePart = lower.slice(commaIdx + 1).trim().replace(/\./g, '');
+  } else {
+    // Try splitting on last space if it looks like a 2-letter state
+    const parts = lower.trim().split(/\s+/);
+    if (parts.length >= 2 && parts[parts.length - 1].length === 2) {
+      statePart = parts[parts.length - 1];
+      cityPart = parts.slice(0, -1).join(' ');
+    }
+  }
+
+  // Try to match against rate table
+  let match = null;
+  for (const row of RATE_TABLE) {
+    const [kw, st, rate, name] = row;
+    const cityMatch = cityPart.includes(kw) || kw.includes(cityPart) || kw === cityPart;
+    const stateMatch = !statePart || st === statePart;
+    if (cityMatch && stateMatch) {
+      match = row;
+      break;
+    }
+  }
+
+  if (match) {
+    setRate(match[2], match[3] + ' — GSA rate');
+    document.getElementById('manualRateField').style.display = 'none';
+    document.getElementById('lookupNote').style.display = 'none';
+  } else if (cityPart.length > 2) {
+    // Not in NSA table — standard rate likely applies
+    document.getElementById('manualRateField').style.display = '';
+    document.getElementById('rateDisplay').style.display = 'none';
+    document.getElementById('lookupNote').style.display = '';
+    document.getElementById('lookupNoteText').innerHTML =
+      'Not found as a GSA Non-Standard Area. The standard rate ($68/day) likely applies — confirm at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter the rate below.';
+  }
+}
+
+function applyManualRate() {
+  const v = parseFloat(document.getElementById('manualRate').value);
+  if (!isNaN(v) && v > 0) {
+    const city = document.getElementById('otherCity').value || 'Other location';
+    setRate(v, city + ' — manually entered');
+  }
+}
+
+function setRate(rate, label) {
+  currentMIE = rate;
+  document.getElementById('rateVal').textContent = fmt(rate) + '/day';
+  document.getElementById('rateSource').textContent = label;
+  document.getElementById('rateDisplay').style.display = '';
+  rebuildDays();
+}
+
+// ── DATE HANDLING ──
+document.getElementById('startDate').addEventListener('change', rebuildDays);
+document.getElementById('endDate').addEventListener('change', rebuildDays);
+
+function getDateRange(start, end) {
+  const dates = [];
+  let cur = new Date(start + 'T12:00:00');
+  const endD = new Date(end + 'T12:00:00');
+  while (cur <= endD) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+function formatDate(d) {
+  const [y, m, day] = d.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[parseInt(m)-1]} ${parseInt(day)}, ${y}`;
+}
+
+function dayOfWeek(d) {
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return days[new Date(d + 'T12:00:00').getDay()];
+}
+
+function rebuildDays() {
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+  const dateError = document.getElementById('dateError');
+
+  // Show error only when both dates are filled and end is before start
+  if (start && end && end < start) {
+    dateError.style.display = '';
+    document.getElementById('dailySection').style.display = 'none';
+    document.getElementById('totalsSection').style.display = 'none';
+    document.getElementById('printBtn').style.display = 'none';
+    document.getElementById('printNote').style.display = 'none';
+    return;
+  } else {
+    dateError.style.display = 'none';
+  }
+
+  if (!start || !end || currentMIE === 0) {
+    document.getElementById('dailySection').style.display = 'none';
+    document.getElementById('totalsSection').style.display = 'none';
+    document.getElementById('printBtn').style.display = 'none';
+    document.getElementById('printNote').style.display = 'none';
+    return;
+  }
+
+  const dates = getDateRange(start, end);
+  if (dates.length === 0 || dates.length > 30) return;
+
+  // Parse travel times to determine meal availability
+  const depTime = document.getElementById('startTime').value || '00:00';
+  const retTime = document.getElementById('endTime').value || '23:59';
+  const [depH, depM] = depTime.split(':').map(Number);
+  const [retH, retM] = retTime.split(':').map(Number);
+  const depMinutes = depH * 60 + depM;
+  const retMinutes = retH * 60 + retM;
+
+  // GSA standard meal window midpoints (approximate)
+  // Breakfast ~8am (480), Lunch ~12pm (720), Dinner ~6pm (1080)
+  const MEAL_TIMES = { breakfast: 480, lunch: 720, dinner: 1080 };
+
+  // Preserve existing meal selections
+  const prevData = {};
+  days.forEach(d => { prevData[d.date] = d; });
+
+  days = dates.map((date, i) => {
+    const isFirst = i === 0;
+    const isLast = i === dates.length - 1;
+    const isTravelDay = isFirst || isLast;
+    const prev = prevData[date];
+
+    // Determine which meals fall within travel window
+    // On departure day: only meals AFTER departure time are claimable
+    // On return day: only meals BEFORE return time are claimable
+    // Middle days: all meals available
+    const mealAvailable = {
+      breakfast: true,
+      lunch: true,
+      dinner: true
+    };
+    if (isFirst && isLast) {
+      // Same-day trip
+      mealAvailable.breakfast = MEAL_TIMES.breakfast >= depMinutes && MEAL_TIMES.breakfast <= retMinutes;
+      mealAvailable.lunch     = MEAL_TIMES.lunch     >= depMinutes && MEAL_TIMES.lunch     <= retMinutes;
+      mealAvailable.dinner    = MEAL_TIMES.dinner    >= depMinutes && MEAL_TIMES.dinner    <= retMinutes;
+    } else if (isFirst) {
+      mealAvailable.breakfast = MEAL_TIMES.breakfast >= depMinutes;
+      mealAvailable.lunch     = MEAL_TIMES.lunch     >= depMinutes;
+      mealAvailable.dinner    = MEAL_TIMES.dinner    >= depMinutes;
+    } else if (isLast) {
+      mealAvailable.breakfast = MEAL_TIMES.breakfast <= retMinutes;
+      mealAvailable.lunch     = MEAL_TIMES.lunch     <= retMinutes;
+      mealAvailable.dinner    = MEAL_TIMES.dinner    <= retMinutes;
+    }
+
+    return {
+      date,
+      isFirst,
+      isLast,
+      isTravelDay: prev ? prev.isTravelDay : isTravelDay,
+      mealAvailable,
+      breakfast: prev ? (prev.breakfast && mealAvailable.breakfast) : false,
+      lunch:     prev ? (prev.lunch     && mealAvailable.lunch)     : false,
+      dinner:    prev ? (prev.dinner    && mealAvailable.dinner)    : false,
+    };
+  });
+
+  renderTable();
+  document.getElementById('dailySection').style.display = '';
+  document.getElementById('totalsSection').style.display = '';
+  document.getElementById('printBtn').style.display = '';
+  document.getElementById('printNote').style.display = '';
+  calcTotals();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('dayTableBody');
+  tbody.innerHTML = '';
+
+  days.forEach((day, idx) => {
+    const tr = document.createElement('tr');
+
+    // Date
+    const tdDate = document.createElement('td');
+    tdDate.className = 'date-cell';
+    tdDate.innerHTML = `<strong>${dayOfWeek(day.date)}</strong><br>${formatDate(day.date)}`;
+    tr.appendChild(tdDate);
+
+    // Day type
+    const tdType = document.createElement('td');
+    tdType.className = 'type-cell';
+    tdType.innerHTML = `<select onchange="setDayType(${idx}, this.value)">
+      <option value="travel" ${day.isTravelDay ? 'selected' : ''}>Travel day (75%)</option>
+      <option value="full" ${!day.isTravelDay ? 'selected' : ''}>Full day (100%)</option>
+    </select>`;
+    if (day.isFirst || day.isLast) {
+      tdType.innerHTML += `<br><span class="travel-tag tag-travel" style="margin-top:3px;">${day.isFirst && day.isLast ? 'First &amp; Last' : day.isFirst ? 'First day' : 'Last day'}</span>`;
+    }
+    tr.appendChild(tdType);
+
+    // Meals provided
+    const tdMeals = document.createElement('td');
+    const meals = ['breakfast', 'lunch', 'dinner'];
+    const labels = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
+    const bd = getMealBreakdown(currentMIE);
+    let mealsHtml = '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center;">';
+    meals.forEach(meal => {
+      const avail = day.mealAvailable[meal];
+      const checked = day[meal];
+      const mealAmt = bd[meal];
+      const disabledAttr = avail ? '' : 'disabled';
+      const titleAttr = avail ? `title="Deducts $${mealAmt} from reimbursement"` : `title="Outside travel window — not claimable"`;
+      const grayStyle = avail ? '' : 'opacity:0.35; cursor:not-allowed;';
+      mealsHtml += `<label class="meal-check ${checked ? 'checked' : ''}" style="${grayStyle}" ${titleAttr}>
+        <input type="checkbox" ${checked ? 'checked' : ''} ${disabledAttr} onchange="setMeal(${idx},'${meal}',this.checked)">
+        ${labels[meal]} <span style="font-family:var(--mono); font-size:10px; color:var(--ink-light);">($${mealAmt})</span>
+      </label>`;
+    });
+    mealsHtml += '</div>';
+    tdMeals.innerHTML = mealsHtml;
+    tr.appendChild(tdMeals);
+
+    // Amount
+    const tdAmt = document.createElement('td');
+    tdAmt.className = 'amount-cell';
+    const amt = calcDayMIE(day);
+    tdAmt.textContent = fmt(amt);
+    if (amt === 0) tdAmt.classList.add('zero');
+    else if (amt < currentMIE) tdAmt.classList.add('reduced');
+    tr.appendChild(tdAmt);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function setDayType(idx, val) {
+  days[idx].isTravelDay = val === 'travel';
+  updateRowAmount(idx);
+  calcTotals();
+}
+
+function setMeal(idx, meal, checked) {
+  days[idx][meal] = checked;
+  updateRowAmount(idx);
+  calcTotals();
+}
+
+function updateRowAmount(idx) {
+  const rows = document.getElementById('dayTableBody').querySelectorAll('tr');
+  if (!rows[idx]) return;
+  const tdAmt = rows[idx].querySelectorAll('td')[3];
+  const amt = calcDayMIE(days[idx]);
+  tdAmt.textContent = fmt(amt);
+  tdAmt.className = 'amount-cell';
+  if (amt === 0) tdAmt.classList.add('zero');
+  else if (amt < currentMIE) tdAmt.classList.add('reduced');
+}
+
+function calcDayMIE(day) {
+  const bd = getMealBreakdown(currentMIE);
+  // Base M&IE minus incidentals (meals-only portion), adjusted for travel day
+  const mealsTotal = currentMIE - bd.incidentals;
+  const base = day.isTravelDay ? Math.round(mealsTotal * 0.75) : mealsTotal;
+  // Deduct provided meals using exact GSA dollar values
+  let deduct = 0;
+  if (day.breakfast && day.mealAvailable.breakfast) deduct += bd.breakfast;
+  if (day.lunch     && day.mealAvailable.lunch)     deduct += bd.lunch;
+  if (day.dinner    && day.mealAvailable.dinner)    deduct += bd.dinner;
+  return Math.max(0, base - deduct);
+}
+
+function calcTotals() {
+  const bd = getMealBreakdown(currentMIE);
+  let totalMeals = 0;
+  days.forEach(d => { totalMeals += calcDayMIE(d); });
+
+  // Incidentals: flat $5/day per GSA (not subject to 75% travel day reduction)
+  const totalInc = days.length * bd.incidentals;
+
+  document.getElementById('totalMeals').textContent = fmt(totalMeals);
+  document.getElementById('totalIncidentals').textContent = fmt(totalInc);
+  document.getElementById('totalReimb').textContent = fmt(totalMeals + totalInc);
+}
+
+function toggleNotesprint() {
+  // Called on input; keeps state in sync so print reflects current content
+  const hasNotes = document.getElementById('notes').value.trim().length > 0;
+  document.getElementById('notesField').classList.toggle('notes-empty', !hasNotes);
+}
+
+function printReport() {
+  // Apply notes visibility before printing
+  toggleNotesprint();
+  document.getElementById('printDateDisplay').innerHTML =
+    `Submitted: ${new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'})}`;
+  window.print();
+}
+
+function resetForm() {
+  if (!confirm('Clear all data and start over?')) return;
+  document.getElementById('empName').value = '';
+  document.getElementById('tripPurpose').value = '';
+  document.getElementById('startDate').value = '';
+  document.getElementById('startTime').value = '08:00';
+  document.getElementById('endDate').value = '';
+  document.getElementById('endTime').value = '18:00';
+  document.getElementById('notes').value = '';
+  document.getElementById('locationPreset').value = '';
+  document.getElementById('otherCity').value = '';
+  document.getElementById('manualRate').value = '';
+  document.getElementById('otherCityField').style.display = 'none';
+  document.getElementById('manualRateField').style.display = 'none';
+  document.getElementById('rateDisplay').style.display = 'none';
+  document.getElementById('lookupNote').style.display = 'none';
+  document.getElementById('dailySection').style.display = 'none';
+  document.getElementById('totalsSection').style.display = 'none';
+  document.getElementById('printBtn').style.display = 'none';
+  document.getElementById('printNote').style.display = 'none';
+  currentMIE = 0;
+  days = [];
+}
+</script>
+</body>
+</html>
