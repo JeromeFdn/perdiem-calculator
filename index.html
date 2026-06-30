@@ -357,14 +357,41 @@
           <label>Destination</label>
           <select id="locationPreset" onchange="handleLocationPreset()">
             <option value="">— select —</option>
-            <option value="nyc">New York City, NY</option>
-            <option value="mn">Minnesota (standard)</option>
-            <option value="other">Other U.S. location</option>
+            <option value="msp">Minneapolis / St. Paul, MN — $92</option>
+            <option value="duluth">Duluth, MN — $86</option>
+            <option value="rochester">Rochester, MN — $80</option>
+            <option value="chicago">Chicago, IL — $92</option>
+            <option value="memphis">Memphis, TN — $74</option>
+            <option value="nyc">New York City, NY — $92</option>
+            <option value="standard">Standard CONUS rate — $68</option>
+            <option value="other">Other U.S. location (look up at GSA)…</option>
           </select>
         </div>
-        <div class="field" id="otherCityField" style="display:none">
-          <label>City, State</label>
-          <input type="text" id="otherCity" placeholder="e.g. Chicago, IL or Memphis, TN" oninput="lookupOtherCity()">
+      </div>
+
+      <!-- Other-location manual lookup (shown only when "Other" is selected) -->
+      <div id="otherBlock" style="display:none; margin-bottom: 16px;">
+        <p class="note" style="margin-top:0; margin-bottom:10px;">
+          This location isn't in the saved list. Look up its M&amp;IE total at
+          <a href="https://www.gsa.gov/travel/plan-book/per-diem-rates" target="_blank">gsa.gov per diem rates</a>
+          — select the state, then the city — and enter what you find below. Every continental-U.S. M&amp;IE rate is one of five values ($68, $74, $80, $86, or $92); the standard $68 rate applies to any location GSA doesn't list separately.
+        </p>
+        <div class="field-grid">
+          <div class="field">
+            <label>Location label (for your report)</label>
+            <input type="text" id="otherCity" placeholder="e.g. Austin, TX" oninput="applyOtherRate()">
+          </div>
+          <div class="field">
+            <label>M&amp;IE rate from GSA</label>
+            <select id="otherRate" onchange="applyOtherRate()">
+              <option value="">— select rate —</option>
+              <option value="68">$68 — standard</option>
+              <option value="74">$74</option>
+              <option value="80">$80</option>
+              <option value="86">$86</option>
+              <option value="92">$92 — highest</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -376,21 +403,7 @@
           </div>
           <div style="margin-left:16px; color: var(--ink-light); font-size: 12px;" id="rateSource"></div>
         </div>
-        <p class="note" style="margin-top: 7px;">Verify or look up any rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>.</p>
-      </div>
-
-      <div id="manualRateField" style="display:none">
-        <div class="field" style="max-width: 200px;">
-          <label>Enter M&amp;IE Rate Manually ($)</label>
-          <input type="number" id="manualRate" placeholder="68.00" step="0.01" oninput="applyManualRate()">
-        </div>
-        <p class="note" style="margin-top:8px;">
-          Location not found in table. Look up the rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter it above.
-        </p>
-      </div>
-
-      <div id="lookupNote" style="display:none">
-        <p class="note" id="lookupNoteText"></p>
+        <p class="note" style="margin-top: 7px;">GSA FY2026 rate. Verify any figure at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>.</p>
       </div>
     </div>
   </div>
@@ -458,120 +471,13 @@
 <script>
 // ─────────────────────────────────────────────
 // GSA FY 2026 CONUS M&IE RATES
-// Standard rate: $68. NYC/high-cost areas listed below.
-// Rates held at FY 2025 levels per GSA Bulletin FTR 26-01.
-// Update this table each October when new rates are published.
-// Source: gsa.gov/perdiem
+// Standard rate: $68. Rates held at FY 2025 levels per GSA Bulletin FTR 26-01.
+// Every CONUS M&IE rate is one of five tiers: 68, 74, 80, 86, 92.
+// Curated destinations below were verified at gsa.gov/perdiem.
+// Update each October when new rates are published. Source: gsa.gov/perdiem
 // ─────────────────────────────────────────────
-const RATE_TABLE = [
-  // [city keywords, state, mie_rate, display_name]
-  // New York
-  ["new york", "ny", 92, "New York City, NY"],
-  ["manhattan", "ny", 92, "New York City (Manhattan), NY"],
-  ["brooklyn", "ny", 92, "New York City (Brooklyn), NY"],
-  ["bronx", "ny", 92, "New York City (Bronx), NY"],
-  ["queens", "ny", 92, "New York City (Queens), NY"],
-  ["staten island", "ny", 92, "New York City (Staten Island), NY"],
-  // California
-  ["los angeles", "ca", 84, "Los Angeles, CA"],
-  ["san francisco", "ca", 92, "San Francisco, CA"],
-  ["san jose", "ca", 84, "San Jose, CA"],
-  ["san diego", "ca", 80, "San Diego, CA"],
-  ["oakland", "ca", 92, "Oakland, CA"],
-  ["santa barbara", "ca", 80, "Santa Barbara, CA"],
-  ["monterey", "ca", 80, "Monterey, CA"],
-  ["napa", "ca", 80, "Napa, CA"],
-  ["sacramento", "ca", 72, "Sacramento, CA"],
-  // DC area
-  ["washington", "dc", 92, "Washington, DC"],
-  ["arlington", "va", 92, "Arlington, VA"],
-  ["alexandria", "va", 92, "Alexandria, VA"],
-  ["bethesda", "md", 92, "Bethesda, MD"],
-  // Illinois
-  ["chicago", "il", 84, "Chicago, IL"],
-  // Massachusetts
-  ["boston", "ma", 84, "Boston, MA"],
-  ["cambridge", "ma", 84, "Cambridge, MA"],
-  // Colorado
-  ["denver", "co", 76, "Denver, CO"],
-  ["aspen", "co", 80, "Aspen, CO"],
-  ["boulder", "co", 76, "Boulder, CO"],
-  ["vail", "co", 80, "Vail, CO"],
-  // Texas
-  ["austin", "tx", 76, "Austin, TX"],
-  ["dallas", "tx", 72, "Dallas, TX"],
-  ["houston", "tx", 72, "Houston, TX"],
-  // Florida
-  ["miami", "fl", 80, "Miami, FL"],
-  ["orlando", "fl", 72, "Orlando, FL"],
-  ["fort lauderdale", "fl", 80, "Fort Lauderdale, FL"],
-  ["key west", "fl", 80, "Key West, FL"],
-  ["naples", "fl", 76, "Naples, FL"],
-  // Washington State
-  ["seattle", "wa", 84, "Seattle, WA"],
-  // Nevada
-  ["las vegas", "nv", 72, "Las Vegas, NV"],
-  // Oregon
-  ["portland", "or", 76, "Portland, OR"],
-  // Arizona
-  ["phoenix", "az", 72, "Phoenix, AZ"],
-  ["scottsdale", "az", 76, "Scottsdale, AZ"],
-  ["sedona", "az", 76, "Sedona, AZ"],
-  // Georgia
-  ["atlanta", "ga", 72, "Atlanta, GA"],
-  // Tennessee
-  ["nashville", "tn", 72, "Nashville, TN"],
-  ["memphis", "tn", 68, "Memphis, TN"],
-  ["knoxville", "tn", 68, "Knoxville, TN"],
-  // Pennsylvania
-  ["philadelphia", "pa", 76, "Philadelphia, PA"],
-  ["pittsburgh", "pa", 72, "Pittsburgh, PA"],
-  // Ohio
-  ["columbus", "oh", 68, "Columbus, OH"],
-  ["cleveland", "oh", 68, "Cleveland, OH"],
-  // Michigan
-  ["detroit", "mi", 68, "Detroit, MI"],
-  // North Carolina
-  ["charlotte", "nc", 68, "Charlotte, NC"],
-  ["raleigh", "nc", 72, "Raleigh, NC"],
-  // Virginia
-  ["richmond", "va", 72, "Richmond, VA"],
-  ["norfolk", "va", 72, "Norfolk, VA"],
-  // Maryland
-  ["baltimore", "md", 72, "Baltimore, MD"],
-  ["annapolis", "md", 76, "Annapolis, MD"],
-  // Louisiana
-  ["new orleans", "la", 72, "New Orleans, LA"],
-  // Missouri
-  ["kansas city", "mo", 68, "Kansas City, MO"],
-  ["st. louis", "mo", 68, "St. Louis, MO"],
-  // Minnesota — standard CONUS (no NSA designation)
-  ["minneapolis", "mn", 68, "Minneapolis, MN"],
-  ["st. paul", "mn", 68, "St. Paul, MN"],
-  ["duluth", "mn", 68, "Duluth, MN"],
-  // Wisconsin
-  ["milwaukee", "wi", 68, "Milwaukee, WI"],
-  ["madison", "wi", 68, "Madison, WI"],
-  // Utah
-  ["salt lake city", "ut", 72, "Salt Lake City, UT"],
-  ["park city", "ut", 80, "Park City, UT"],
-  // Hawaii (DoD rates — approximate; verify at gsa.gov)
-  ["honolulu", "hi", 88, "Honolulu, HI"],
-  // New Mexico
-  ["santa fe", "nm", 76, "Santa Fe, NM"],
-  ["albuquerque", "nm", 68, "Albuquerque, NM"],
-  // Idaho
-  ["sun valley", "id", 80, "Sun Valley, ID"],
-  ["boise", "id", 68, "Boise, ID"],
-  // Montana
-  ["bozeman", "mt", 72, "Bozeman, MT"],
-  // Wyoming
-  ["jackson", "wy", 80, "Jackson, WY"],
-];
 
-// GSA FY 2026 exact M&IE meal dollar breakdowns by rate tier
-// Source: GSA official per diem data, verified against gsa.gov
-// Update each October when new rates are published.
+// Exact GSA M&IE meal dollar breakdowns by tier.
 const MIE_BREAKDOWN = {
   68: { breakfast: 16, lunch: 19, dinner: 28, incidentals: 5 },
   74: { breakfast: 18, lunch: 20, dinner: 31, incidentals: 5 },
@@ -579,24 +485,23 @@ const MIE_BREAKDOWN = {
   86: { breakfast: 22, lunch: 23, dinner: 36, incidentals: 5 },
   92: { breakfast: 23, lunch: 26, dinner: 38, incidentals: 5 },
 };
+const LEGAL_TIERS = [68, 74, 80, 86, 92];
+
+// Curated, verified destinations. key -> { rate, label }
+const PRESETS = {
+  msp:       { rate: 92, label: 'Minneapolis / St. Paul, MN' },
+  duluth:    { rate: 86, label: 'Duluth, MN' },
+  rochester: { rate: 80, label: 'Rochester, MN' },
+  chicago:   { rate: 92, label: 'Chicago, IL' },
+  memphis:   { rate: 74, label: 'Memphis, TN' },
+  nyc:       { rate: 92, label: 'New York City, NY' },
+  standard:  { rate: 68, label: 'Standard CONUS rate' },
+};
 
 function getMealBreakdown(mie) {
-  // Use exact tier if available, otherwise calculate proportionally
-  if (MIE_BREAKDOWN[mie]) return MIE_BREAKDOWN[mie];
-  // Fallback for manually-entered rates: proportional with flat $5 incidentals
-  const meals = mie - 5;
-  return {
-    breakfast: Math.round(meals * 0.1818),  // ~16/88 of meal total
-    lunch:     Math.round(meals * 0.2727),  // ~24/88
-    dinner:    Math.round(meals * 0.4545),  // ~40/88
-    incidentals: 5
-  };
+  // Only the five legal GSA tiers are valid. No silent approximation.
+  return MIE_BREAKDOWN[mie] || null;
 }
-
-// NYC preset M&IE
-const NYC_RATE = 92;
-const MN_RATE = 68;
-const STANDARD_RATE = 68;
 
 let currentMIE = 0;
 let days = [];
@@ -607,83 +512,46 @@ function fmt(n) {
 
 function handleLocationPreset() {
   const val = document.getElementById('locationPreset').value;
-  document.getElementById('otherCityField').style.display = 'none';
-  document.getElementById('manualRateField').style.display = 'none';
-  document.getElementById('lookupNote').style.display = 'none';
+  document.getElementById('otherBlock').style.display = 'none';
 
-  if (val === 'nyc') {
-    setRate(NYC_RATE, 'New York City, NY — NSA rate');
-  } else if (val === 'mn') {
-    setRate(MN_RATE, 'Minnesota — standard CONUS rate');
-  } else if (val === 'other') {
-    document.getElementById('otherCityField').style.display = '';
-    document.getElementById('rateDisplay').style.display = 'none';
-    document.getElementById('lookupNote').style.display = '';
-    document.getElementById('lookupNoteText').textContent = 'Enter city and state to look up the rate.';
-    currentMIE = 0;
+  if (val === 'other') {
+    document.getElementById('otherBlock').style.display = '';
+    applyOtherRate();
+    return;
+  }
+
+  if (PRESETS[val]) {
+    const p = PRESETS[val];
+    const suffix = val === 'standard'
+      ? ' — applies where GSA lists no specific rate'
+      : ' — GSA FY2026';
+    setRate(p.rate, p.label + suffix);
   } else {
     document.getElementById('rateDisplay').style.display = 'none';
     currentMIE = 0;
+    rebuildDays();
   }
-  rebuildDays();
 }
 
-function lookupOtherCity() {
-  const raw = (document.getElementById('otherCity').value || '').trim();
-  if (!raw || raw.length < 2) return;
-
-  // Parse "City, ST" or "City ST" or just "City"
-  const lower = raw.toLowerCase();
-  let cityPart = lower;
-  let statePart = '';
-  const commaIdx = lower.lastIndexOf(',');
-  if (commaIdx > -1) {
-    cityPart = lower.slice(0, commaIdx).trim();
-    statePart = lower.slice(commaIdx + 1).trim().replace(/\./g, '');
+function applyOtherRate() {
+  const rate = parseInt(document.getElementById('otherRate').value, 10);
+  const label = (document.getElementById('otherCity').value || 'Other location').trim();
+  if (LEGAL_TIERS.includes(rate)) {
+    setRate(rate, label + ' — GSA FY2026 (manual lookup)');
   } else {
-    // Try splitting on last space if it looks like a 2-letter state
-    const parts = lower.trim().split(/\s+/);
-    if (parts.length >= 2 && parts[parts.length - 1].length === 2) {
-      statePart = parts[parts.length - 1];
-      cityPart = parts.slice(0, -1).join(' ');
-    }
-  }
-
-  // Try to match against rate table
-  let match = null;
-  for (const row of RATE_TABLE) {
-    const [kw, st, rate, name] = row;
-    const cityMatch = cityPart.includes(kw) || kw.includes(cityPart) || kw === cityPart;
-    const stateMatch = !statePart || st === statePart;
-    if (cityMatch && stateMatch) {
-      match = row;
-      break;
-    }
-  }
-
-  if (match) {
-    setRate(match[2], match[3] + ' — GSA rate');
-    document.getElementById('manualRateField').style.display = 'none';
-    document.getElementById('lookupNote').style.display = 'none';
-  } else if (cityPart.length > 2) {
-    // Not in NSA table — standard rate likely applies
-    document.getElementById('manualRateField').style.display = '';
     document.getElementById('rateDisplay').style.display = 'none';
-    document.getElementById('lookupNote').style.display = '';
-    document.getElementById('lookupNoteText').innerHTML =
-      'Not found as a GSA Non-Standard Area. The standard rate ($68/day) likely applies — confirm at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter the rate below.';
-  }
-}
-
-function applyManualRate() {
-  const v = parseFloat(document.getElementById('manualRate').value);
-  if (!isNaN(v) && v > 0) {
-    const city = document.getElementById('otherCity').value || 'Other location';
-    setRate(v, city + ' — manually entered');
+    currentMIE = 0;
+    rebuildDays();
   }
 }
 
 function setRate(rate, label) {
+  // Guard: refuse any value that isn't a real GSA M&IE tier, so the tool
+  // can never silently produce an approximated (wrong) breakdown.
+  if (!LEGAL_TIERS.includes(rate)) {
+    alert('$' + rate + ' is not a valid GSA M&IE tier. Valid tiers are $68, $74, $80, $86, and $92.');
+    return;
+  }
   currentMIE = rate;
   document.getElementById('rateVal').textContent = fmt(rate) + '/day';
   document.getElementById('rateSource').textContent = label;
@@ -896,10 +764,14 @@ function updateRowAmount(idx) {
 
 function calcDayMIE(day) {
   const bd = getMealBreakdown(currentMIE);
-  // Base M&IE minus incidentals (meals-only portion), adjusted for travel day
-  const mealsTotal = currentMIE - bd.incidentals;
-  const base = day.isTravelDay ? Math.round(mealsTotal * 0.75) : mealsTotal;
-  // Deduct provided meals using exact GSA dollar values
+  // GSA applies the 75% first/last-day reduction to the full M&IE (meals + the
+  // $5 incidental). We track incidentals as a separate flat $5/day line, so the
+  // meals-portion base is (0.75 * M&IE - incidentals) on travel days. This makes
+  // a $92 travel day total $69.00 and a $68 day $51.00, matching GSA exactly.
+  const base = day.isTravelDay
+    ? (currentMIE * 0.75 - bd.incidentals)
+    : (currentMIE - bd.incidentals);
+  // Deduct provided meals using exact GSA dollar values (full value even on 75% days)
   let deduct = 0;
   if (day.breakfast && day.mealAvailable.breakfast) deduct += bd.breakfast;
   if (day.lunch     && day.mealAvailable.lunch)     deduct += bd.lunch;
@@ -945,11 +817,9 @@ function resetForm() {
   document.getElementById('notes').value = '';
   document.getElementById('locationPreset').value = '';
   document.getElementById('otherCity').value = '';
-  document.getElementById('manualRate').value = '';
-  document.getElementById('otherCityField').style.display = 'none';
-  document.getElementById('manualRateField').style.display = 'none';
+  document.getElementById('otherRate').value = '';
+  document.getElementById('otherBlock').style.display = 'none';
   document.getElementById('rateDisplay').style.display = 'none';
-  document.getElementById('lookupNote').style.display = 'none';
   document.getElementById('dailySection').style.display = 'none';
   document.getElementById('totalsSection').style.display = 'none';
   document.getElementById('printBtn').style.display = 'none';
