@@ -211,6 +211,9 @@
     gap: 12px;
     margin-top: 4px;
   }
+  .totals-grid.four-col {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+  }
   .total-card {
     border: 1px solid var(--rule);
     border-radius: 6px;
@@ -285,6 +288,7 @@
     .print-header .print-date { font-family: var(--mono); font-size: 11px; color: var(--ink-light); text-align: right; }
 
     .totals-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .totals-grid.four-col { grid-template-columns: 1fr 1fr 1fr 1fr; }
     .total-card.highlight { background: var(--ink) !important; }
 
     .sig-label { font-size: 10px; color: var(--ink-light); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -395,7 +399,51 @@
     </div>
   </div>
 
-  <!-- SECTION 3: Daily Breakdown -->
+  <!-- SECTION 3: Lodging -->
+  <div class="section" id="lodgingSection" style="display:none">
+    <div class="section-head">Lodging</div>
+    <div class="section-body">
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom: 4px;">
+        <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:400; cursor:pointer;">
+          <input type="radio" name="lodgingMode" value="separate" checked onchange="setLodgingMode('separate')" style="margin-top:3px;">
+          <span>Lodging costs expensed separately based on actual reservation
+            <span style="display:block; color:var(--ink-light); font-size:11px; margin-top:1px;">Hotel receipt submitted on its own — not included in this total.</span>
+          </span>
+        </label>
+        <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:400; cursor:pointer;">
+          <input type="radio" name="lodgingMode" value="gsa" onchange="setLodgingMode('gsa')" style="margin-top:3px;">
+          <span>Reimburse lodging costs based on GSA calculation
+            <span style="display:block; color:var(--ink-light); font-size:11px; margin-top:1px;">Uses the GSA maximum lodging rate for the destination, per night, regardless of actual hotel cost.</span>
+          </span>
+        </label>
+      </div>
+
+      <div id="lodgingGSAPanel" style="display:none; margin-top: 14px;">
+        <div id="manualLodgingField" style="display:none; margin-bottom:14px;">
+          <div class="field" style="max-width:220px;">
+            <label>Lodging Rate Override ($/night)</label>
+            <input type="number" id="manualLodgingRate" placeholder="113.00" step="0.01" oninput="applyManualLodgingRate()">
+          </div>
+          <p class="note" style="margin-top:6px;">
+            This location has no seasonal GSA lodging table on file — defaulting to the standard $113/night rate. Look up the actual figure at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a> and override above if it differs.
+          </p>
+        </div>
+        <table class="day-table" id="nightsTable">
+          <thead>
+            <tr>
+              <th style="width:220px">Night</th>
+              <th>GSA Lodging Cap <span class="screen-only" style="font-weight:400; font-size:10px; color: var(--ink-light);">(uncheck to exclude a night — e.g. stayed with family)</span></th>
+              <th style="width:90px; text-align:right">Amount</th>
+            </tr>
+          </thead>
+          <tbody id="nightsTableBody"></tbody>
+        </table>
+        <p class="note" id="noNightsNote" style="display:none; margin-top:8px;">Same-day trip — no lodging nights to reimburse.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 4: Daily Breakdown -->
   <div class="section" id="dailySection" style="display:none">
     <div class="section-head">Daily Breakdown</div>
     <div class="section-body screen-only" style="padding: 12px 20px 0; border-bottom: 1px solid var(--rule);">
@@ -418,11 +466,12 @@
     </div>
   </div>
 
-  <!-- SECTION 4: Totals -->
+  <!-- SECTION 5: Totals -->
+
   <div class="section" id="totalsSection" style="display:none">
     <div class="section-head">Summary</div>
     <div class="section-body">
-      <div class="totals-grid">
+      <div class="totals-grid" id="totalsGrid">
         <div class="total-card">
           <div class="tc-label">Meals Reimbursable</div>
           <div class="tc-val" id="totalMeals">$0.00</div>
@@ -431,11 +480,17 @@
           <div class="tc-label">Incidentals</div>
           <div class="tc-val" id="totalIncidentals">$0.00</div>
         </div>
+        <div class="total-card" id="lodgingCard" style="display:none">
+          <div class="tc-label">Lodging (GSA)</div>
+          <div class="tc-val" id="totalLodging">$0.00</div>
+        </div>
         <div class="total-card highlight">
           <div class="tc-label">Total Reimbursement</div>
           <div class="tc-val" id="totalReimb">$0.00</div>
         </div>
       </div>
+
+      <p class="note" id="lodgingSeparateNote" style="margin-top: 8px;">Lodging is being expensed separately based on the actual reservation and is not included in this total.</p>
 
       <div style="margin-top: 16px;" class="field" id="notesField">
         <label>Notes / Additional Context</label>
@@ -467,446 +522,451 @@
 // Source: api.gsa.gov/travel/perdiem/v2 (conus/lodging/2027), pulled directly from GSA
 // Any city not listed here uses the $68 standard CONUS rate.
 // Update by re-pulling this endpoint each October (or via the api.gsa.gov docs) and regenerating this table.
+// GSA FY 2027 official Non-Standard Area (NSA) rates
+// Source: api.gsa.gov/travel/perdiem/v2 (conus/lodging/2027), pulled directly from GSA
+// Row format: [keyword, state, meals_rate, display_name, [Jan..Dec lodging caps]]
+// Any city not listed here uses the standard CONUS rate ($68 meals / $113 lodging).
+// Update by re-pulling this endpoint each October and regenerating this table.
 const RATE_TABLE = [
   // AL
-  ["birmingham", "al", 80, "Birmingham, AL"],
-  ["gulf shores", "al", 74, "Gulf Shores, AL"],
-  ["huntsville", "al", 74, "Huntsville, AL"],
-  ["mobile", "al", 74, "Mobile, AL"],
+  ["birmingham", "al", 80, "Birmingham, AL", [135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135]],
+  ["gulf shores", "al", 74, "Gulf Shores, AL", [144, 144, 177, 177, 177, 221, 221, 144, 144, 144, 144, 144]],
+  ["huntsville", "al", 74, "Huntsville, AL", [146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146]],
+  ["mobile", "al", 74, "Mobile, AL", [126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126]],
   // AR
-  ["hot springs", "ar", 68, "Hot Springs, AR"],
+  ["hot springs", "ar", 68, "Hot Springs, AR", [115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115]],
   // AZ
-  ["grand canyon", "az", 80, "Grand Canyon / Flagstaff, AZ"],
-  ["flagstaff", "az", 80, "Grand Canyon / Flagstaff, AZ"],
-  ["kayenta", "az", 74, "Kayenta, AZ"],
-  ["phoenix", "az", 86, "Phoenix / Scottsdale, AZ"],
-  ["scottsdale", "az", 86, "Phoenix / Scottsdale, AZ"],
-  ["sedona", "az", 92, "Sedona, AZ"],
-  ["tucson", "az", 80, "Tucson, AZ"],
+  ["grand canyon", "az", 80, "Grand Canyon / Flagstaff, AZ", [113, 113, 152, 152, 152, 152, 152, 152, 152, 152, 113, 113]],
+  ["flagstaff", "az", 80, "Grand Canyon / Flagstaff, AZ", [113, 113, 152, 152, 152, 152, 152, 152, 152, 152, 113, 113]],
+  ["kayenta", "az", 74, "Kayenta, AZ", [147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147]],
+  ["phoenix", "az", 86, "Phoenix / Scottsdale, AZ", [165, 232, 232, 171, 171, 122, 122, 122, 165, 165, 165, 165]],
+  ["scottsdale", "az", 86, "Phoenix / Scottsdale, AZ", [165, 232, 232, 171, 171, 122, 122, 122, 165, 165, 165, 165]],
+  ["sedona", "az", 92, "Sedona, AZ", [172, 172, 282, 282, 189, 189, 189, 189, 220, 220, 220, 220]],
+  ["tucson", "az", 80, "Tucson, AZ", [208, 208, 208, 154, 154, 154, 154, 154, 154, 154, 154, 154]],
   // CA
-  ["antioch", "ca", 86, "Antioch / Brentwood / Concord, CA"],
-  ["brentwood", "ca", 86, "Antioch / Brentwood / Concord, CA"],
-  ["concord", "ca", 86, "Antioch / Brentwood / Concord, CA"],
-  ["bakersfield", "ca", 74, "Bakersfield / Ridgecrest, CA"],
-  ["ridgecrest", "ca", 74, "Bakersfield / Ridgecrest, CA"],
-  ["barstow", "ca", 86, "Barstow / Ontario / Victorville, CA"],
-  ["ontario", "ca", 86, "Barstow / Ontario / Victorville, CA"],
-  ["victorville", "ca", 86, "Barstow / Ontario / Victorville, CA"],
-  ["death valley", "ca", 80, "Death Valley, CA"],
-  ["eureka", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
-  ["arcata", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
-  ["mckinleyville", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
-  ["fresno", "ca", 86, "Fresno, CA"],
-  ["los angeles", "ca", 86, "Los Angeles, CA"],
-  ["mammoth lakes", "ca", 86, "Mammoth Lakes, CA"],
-  ["mill valley", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
-  ["san rafael", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
-  ["novato", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
-  ["monterey", "ca", 92, "Monterey, CA"],
-  ["napa", "ca", 92, "Napa, CA"],
-  ["oakhurst", "ca", 80, "Oakhurst, CA"],
-  ["oakland", "ca", 92, "Oakland, CA"],
-  ["palm springs", "ca", 86, "Palm Springs, CA"],
-  ["point arena", "ca", 86, "Point Arena / Gualala, CA"],
-  ["gualala", "ca", 86, "Point Arena / Gualala, CA"],
-  ["sacramento", "ca", 86, "Sacramento, CA"],
-  ["san diego", "ca", 86, "San Diego, CA"],
-  ["san francisco", "ca", 92, "San Francisco, CA"],
-  ["san luis obispo", "ca", 86, "San Luis Obispo, CA"],
-  ["san mateo", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
-  ["foster city", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
-  ["belmont", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
-  ["santa barbara", "ca", 92, "Santa Barbara, CA"],
-  ["santa cruz", "ca", 86, "Santa Cruz, CA"],
-  ["santa monica", "ca", 92, "Santa Monica, CA"],
-  ["santa rosa", "ca", 86, "Santa Rosa, CA"],
-  ["south lake tahoe", "ca", 86, "South Lake Tahoe, CA"],
-  ["stockton", "ca", 74, "Stockton, CA"],
-  ["sunnyvale", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
-  ["palo alto", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
-  ["san jose", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
-  ["tahoe city", "ca", 86, "Tahoe City, CA"],
-  ["truckee", "ca", 86, "Truckee, CA"],
-  ["visalia", "ca", 80, "Visalia, CA"],
-  ["west sacramento", "ca", 80, "West Sacramento / Davis, CA"],
-  ["davis", "ca", 80, "West Sacramento / Davis, CA"],
-  ["yosemite national park", "ca", 86, "Yosemite National Park, CA"],
+  ["antioch", "ca", 86, "Antioch / Brentwood / Concord, CA", [147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147]],
+  ["brentwood", "ca", 86, "Antioch / Brentwood / Concord, CA", [147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147]],
+  ["concord", "ca", 86, "Antioch / Brentwood / Concord, CA", [147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147]],
+  ["bakersfield", "ca", 74, "Bakersfield / Ridgecrest, CA", [164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164]],
+  ["ridgecrest", "ca", 74, "Bakersfield / Ridgecrest, CA", [164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164]],
+  ["barstow", "ca", 86, "Barstow / Ontario / Victorville, CA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["ontario", "ca", 86, "Barstow / Ontario / Victorville, CA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["victorville", "ca", 86, "Barstow / Ontario / Victorville, CA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["death valley", "ca", 80, "Death Valley, CA", [154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154]],
+  ["eureka", "ca", 86, "Eureka / Arcata / McKinleyville, CA", [130, 130, 130, 130, 130, 181, 181, 181, 130, 130, 130, 130]],
+  ["arcata", "ca", 86, "Eureka / Arcata / McKinleyville, CA", [130, 130, 130, 130, 130, 181, 181, 181, 130, 130, 130, 130]],
+  ["mckinleyville", "ca", 86, "Eureka / Arcata / McKinleyville, CA", [130, 130, 130, 130, 130, 181, 181, 181, 130, 130, 130, 130]],
+  ["fresno", "ca", 86, "Fresno, CA", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["los angeles", "ca", 86, "Los Angeles, CA", [199, 199, 199, 199, 199, 199, 199, 199, 199, 199, 199, 199]],
+  ["mammoth lakes", "ca", 86, "Mammoth Lakes, CA", [208, 208, 208, 146, 146, 146, 146, 146, 146, 146, 146, 208]],
+  ["mill valley", "ca", 92, "Mill Valley / San Rafael / Novato, CA", [169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169]],
+  ["san rafael", "ca", 92, "Mill Valley / San Rafael / Novato, CA", [169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169]],
+  ["novato", "ca", 92, "Mill Valley / San Rafael / Novato, CA", [169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169, 169]],
+  ["monterey", "ca", 92, "Monterey, CA", [196, 209, 209, 209, 209, 209, 293, 293, 196, 196, 196, 196]],
+  ["napa", "ca", 92, "Napa, CA", [194, 194, 194, 266, 266, 266, 266, 266, 266, 266, 266, 194]],
+  ["oakhurst", "ca", 80, "Oakhurst, CA", [137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137]],
+  ["oakland", "ca", 92, "Oakland, CA", [152, 152, 152, 152, 152, 152, 152, 152, 152, 152, 152, 152]],
+  ["palm springs", "ca", 86, "Palm Springs, CA", [186, 192, 192, 192, 141, 141, 141, 141, 141, 186, 186, 186]],
+  ["point arena", "ca", 86, "Point Arena / Gualala, CA", [134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134]],
+  ["gualala", "ca", 86, "Point Arena / Gualala, CA", [134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134]],
+  ["sacramento", "ca", 86, "Sacramento, CA", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["san diego", "ca", 86, "San Diego, CA", [208, 208, 208, 208, 208, 249, 249, 208, 208, 208, 208, 208]],
+  ["san francisco", "ca", 92, "San Francisco, CA", [325, 325, 325, 232, 232, 232, 232, 232, 279, 279, 279, 279]],
+  ["san luis obispo", "ca", 86, "San Luis Obispo, CA", [170, 170, 170, 170, 170, 213, 213, 170, 170, 170, 170, 170]],
+  ["san mateo", "ca", 86, "San Mateo / Foster City / Belmont, CA", [194, 194, 194, 194, 194, 194, 194, 194, 217, 217, 217, 194]],
+  ["foster city", "ca", 86, "San Mateo / Foster City / Belmont, CA", [194, 194, 194, 194, 194, 194, 194, 194, 217, 217, 217, 194]],
+  ["belmont", "ca", 86, "San Mateo / Foster City / Belmont, CA", [194, 194, 194, 194, 194, 194, 194, 194, 217, 217, 217, 194]],
+  ["santa barbara", "ca", 92, "Santa Barbara, CA", [214, 214, 214, 214, 214, 214, 277, 277, 214, 214, 214, 214]],
+  ["santa cruz", "ca", 86, "Santa Cruz, CA", [149, 149, 149, 149, 149, 181, 181, 181, 149, 149, 149, 149]],
+  ["santa monica", "ca", 92, "Santa Monica, CA", [283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283]],
+  ["santa rosa", "ca", 86, "Santa Rosa, CA", [163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163]],
+  ["south lake tahoe", "ca", 86, "South Lake Tahoe, CA", [262, 262, 262, 168, 168, 198, 198, 198, 198, 198, 198, 262]],
+  ["stockton", "ca", 74, "Stockton, CA", [137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137]],
+  ["sunnyvale", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA", [218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218]],
+  ["palo alto", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA", [218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218]],
+  ["san jose", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA", [218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218, 218]],
+  ["tahoe city", "ca", 86, "Tahoe City, CA", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["truckee", "ca", 86, "Truckee, CA", [178, 178, 151, 151, 151, 174, 174, 174, 174, 148, 148, 178]],
+  ["visalia", "ca", 80, "Visalia, CA", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["west sacramento", "ca", 80, "West Sacramento / Davis, CA", [148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["davis", "ca", 80, "West Sacramento / Davis, CA", [148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["yosemite national park", "ca", 86, "Yosemite National Park, CA", [212, 212, 212, 212, 184, 184, 184, 184, 184, 184, 184, 212]],
   // CO
-  ["aspen", "co", 92, "Aspen, CO"],
-  ["boulder", "co", 80, "Boulder / Broomfield, CO"],
-  ["broomfield", "co", 80, "Boulder / Broomfield, CO"],
-  ["colorado springs", "co", 86, "Colorado Springs, CO"],
-  ["cortez", "co", 74, "Cortez, CO"],
-  ["crested butte", "co", 86, "Crested Butte / Gunnison, CO"],
-  ["gunnison", "co", 86, "Crested Butte / Gunnison, CO"],
-  ["denver", "co", 92, "Denver / Aurora, CO"],
-  ["aurora", "co", 92, "Denver / Aurora, CO"],
-  ["douglas", "co", 80, "Douglas, CO"],
-  ["durango", "co", 80, "Durango, CO"],
-  ["fort collins", "co", 80, "Fort Collins / Loveland, CO"],
-  ["loveland", "co", 80, "Fort Collins / Loveland, CO"],
-  ["grand lake", "co", 86, "Grand Lake, CO"],
-  ["montrose", "co", 74, "Montrose, CO"],
-  ["silverthorne", "co", 92, "Silverthorne / Breckenridge, CO"],
-  ["breckenridge", "co", 92, "Silverthorne / Breckenridge, CO"],
-  ["steamboat springs", "co", 92, "Steamboat Springs, CO"],
-  ["telluride", "co", 92, "Telluride, CO"],
-  ["vail", "co", 92, "Vail, CO"],
+  ["aspen", "co", 92, "Aspen, CO", [419, 419, 419, 217, 217, 217, 217, 217, 217, 173, 173, 419]],
+  ["boulder", "co", 80, "Boulder / Broomfield, CO", [125, 125, 125, 125, 173, 173, 173, 173, 173, 173, 125, 125]],
+  ["broomfield", "co", 80, "Boulder / Broomfield, CO", [125, 125, 125, 125, 173, 173, 173, 173, 173, 173, 125, 125]],
+  ["colorado springs", "co", 86, "Colorado Springs, CO", [128, 128, 128, 128, 128, 176, 176, 176, 128, 128, 128, 128]],
+  ["cortez", "co", 74, "Cortez, CO", [113, 113, 113, 113, 140, 140, 140, 140, 140, 140, 113, 113]],
+  ["crested butte", "co", 86, "Crested Butte / Gunnison, CO", [150, 150, 150, 140, 140, 179, 179, 179, 179, 179, 150, 150]],
+  ["gunnison", "co", 86, "Crested Butte / Gunnison, CO", [150, 150, 150, 140, 140, 179, 179, 179, 179, 179, 150, 150]],
+  ["denver", "co", 92, "Denver / Aurora, CO", [170, 170, 170, 227, 227, 227, 227, 227, 227, 227, 170, 170]],
+  ["aurora", "co", 92, "Denver / Aurora, CO", [170, 170, 170, 227, 227, 227, 227, 227, 227, 227, 170, 170]],
+  ["douglas", "co", 80, "Douglas, CO", [113, 113, 113, 113, 113, 139, 139, 139, 113, 113, 113, 113]],
+  ["durango", "co", 80, "Durango, CO", [122, 122, 122, 122, 122, 190, 190, 190, 190, 122, 122, 122]],
+  ["fort collins", "co", 80, "Fort Collins / Loveland, CO", [120, 120, 120, 120, 120, 157, 157, 157, 120, 120, 120, 120]],
+  ["loveland", "co", 80, "Fort Collins / Loveland, CO", [120, 120, 120, 120, 120, 157, 157, 157, 120, 120, 120, 120]],
+  ["grand lake", "co", 86, "Grand Lake, CO", [182, 182, 182, 128, 128, 152, 152, 152, 152, 152, 152, 182]],
+  ["montrose", "co", 74, "Montrose, CO", [143, 143, 143, 143, 143, 194, 194, 194, 194, 194, 143, 143]],
+  ["silverthorne", "co", 92, "Silverthorne / Breckenridge, CO", [296, 296, 296, 164, 164, 164, 164, 164, 164, 164, 164, 296]],
+  ["breckenridge", "co", 92, "Silverthorne / Breckenridge, CO", [296, 296, 296, 164, 164, 164, 164, 164, 164, 164, 164, 296]],
+  ["steamboat springs", "co", 92, "Steamboat Springs, CO", [299, 299, 299, 126, 126, 188, 188, 188, 188, 135, 135, 299]],
+  ["telluride", "co", 92, "Telluride, CO", [367, 367, 367, 186, 186, 186, 186, 186, 186, 186, 186, 367]],
+  ["vail", "co", 92, "Vail, CO", [417, 417, 417, 205, 205, 205, 205, 205, 205, 205, 205, 417]],
   // CT
-  ["bridgeport", "ct", 86, "Bridgeport / Danbury, CT"],
-  ["danbury", "ct", 86, "Bridgeport / Danbury, CT"],
-  ["hartford", "ct", 80, "Hartford, CT"],
-  ["new haven", "ct", 80, "New Haven, CT"],
-  ["new london", "ct", 86, "New London / Groton, CT"],
-  ["groton", "ct", 86, "New London / Groton, CT"],
+  ["bridgeport", "ct", 86, "Bridgeport / Danbury, CT", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["danbury", "ct", 86, "Bridgeport / Danbury, CT", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["hartford", "ct", 80, "Hartford, CT", [146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146]],
+  ["new haven", "ct", 80, "New Haven, CT", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["new london", "ct", 86, "New London / Groton, CT", [149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149]],
+  ["groton", "ct", 86, "New London / Groton, CT", [149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149]],
   // DC
-  ["district of columbia", "dc", 92, "District of Columbia, DC"],
+  ["district of columbia", "dc", 92, "District of Columbia, DC", [203, 203, 295, 295, 295, 295, 192, 192, 287, 287, 203, 203]],
   // DE
-  ["lewes", "de", 74, "Lewes, DE"],
-  ["wilmington", "de", 74, "Wilmington, DE"],
+  ["lewes", "de", 74, "Lewes, DE", [126, 126, 126, 126, 126, 216, 216, 216, 126, 126, 126, 126]],
+  ["wilmington", "de", 74, "Wilmington, DE", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
   // FL
-  ["boca raton", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
-  ["delray beach", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
-  ["jupiter", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
-  ["bradenton", "fl", 80, "Bradenton, FL"],
-  ["cocoa beach", "fl", 74, "Cocoa Beach, FL"],
-  ["daytona beach", "fl", 80, "Daytona Beach, FL"],
-  ["fort lauderdale", "fl", 86, "Fort Lauderdale, FL"],
-  ["fort myers", "fl", 80, "Fort Myers, FL"],
-  ["fort walton beach", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL"],
-  ["de funiak springs", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL"],
-  ["gulf breeze", "fl", 74, "Gulf Breeze, FL"],
-  ["key west", "fl", 86, "Key West, FL"],
-  ["miami", "fl", 92, "Miami, FL"],
-  ["naples", "fl", 80, "Naples, FL"],
-  ["orlando", "fl", 80, "Orlando, FL"],
-  ["panama city", "fl", 80, "Panama City, FL"],
-  ["pensacola", "fl", 74, "Pensacola, FL"],
-  ["punta gorda", "fl", 74, "Punta Gorda, FL"],
-  ["sarasota", "fl", 86, "Sarasota, FL"],
-  ["sebring", "fl", 74, "Sebring, FL"],
-  ["st augustine", "fl", 80, "St. Augustine, FL"],
-  ["stuart", "fl", 80, "Stuart, FL"],
-  ["tallahassee", "fl", 80, "Tallahassee, FL"],
-  ["tampa", "fl", 80, "Tampa / St. Petersburg, FL"],
-  ["st petersburg", "fl", 80, "Tampa / St. Petersburg, FL"],
-  ["vero beach", "fl", 74, "Vero Beach, FL"],
+  ["boca raton", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL", [265, 265, 265, 265, 157, 157, 157, 157, 157, 186, 186, 186]],
+  ["delray beach", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL", [265, 265, 265, 265, 157, 157, 157, 157, 157, 186, 186, 186]],
+  ["jupiter", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL", [265, 265, 265, 265, 157, 157, 157, 157, 157, 186, 186, 186]],
+  ["bradenton", "fl", 80, "Bradenton, FL", [157, 237, 237, 151, 151, 151, 151, 151, 151, 157, 157, 157]],
+  ["cocoa beach", "fl", 74, "Cocoa Beach, FL", [166, 212, 212, 166, 166, 166, 166, 166, 166, 166, 166, 166]],
+  ["daytona beach", "fl", 80, "Daytona Beach, FL", [158, 158, 158, 158, 138, 138, 138, 128, 128, 128, 128, 128]],
+  ["fort lauderdale", "fl", 86, "Fort Lauderdale, FL", [232, 232, 232, 232, 150, 150, 150, 150, 150, 180, 180, 180]],
+  ["fort myers", "fl", 80, "Fort Myers, FL", [213, 213, 213, 213, 141, 141, 141, 141, 141, 141, 141, 141]],
+  ["fort walton beach", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL", [113, 113, 190, 190, 190, 274, 274, 171, 171, 171, 113, 113]],
+  ["de funiak springs", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL", [113, 113, 190, 190, 190, 274, 274, 171, 171, 171, 113, 113]],
+  ["gulf breeze", "fl", 74, "Gulf Breeze, FL", [131, 131, 164, 164, 164, 210, 210, 131, 131, 131, 131, 131]],
+  ["key west", "fl", 86, "Key West, FL", [383, 452, 452, 452, 267, 267, 267, 267, 267, 279, 279, 383]],
+  ["miami", "fl", 92, "Miami, FL", [219, 244, 244, 194, 194, 151, 151, 151, 151, 151, 151, 219]],
+  ["naples", "fl", 80, "Naples, FL", [267, 326, 326, 326, 170, 170, 170, 170, 170, 170, 170, 267]],
+  ["orlando", "fl", 80, "Orlando, FL", [178, 178, 178, 145, 145, 145, 145, 145, 145, 145, 145, 145]],
+  ["panama city", "fl", 80, "Panama City, FL", [115, 115, 149, 149, 149, 195, 195, 115, 115, 115, 115, 115]],
+  ["pensacola", "fl", 74, "Pensacola, FL", [127, 127, 154, 154, 154, 188, 188, 127, 127, 127, 127, 127]],
+  ["punta gorda", "fl", 74, "Punta Gorda, FL", [127, 202, 202, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["sarasota", "fl", 86, "Sarasota, FL", [146, 205, 205, 205, 131, 131, 131, 131, 131, 146, 146, 146]],
+  ["sebring", "fl", 74, "Sebring, FL", [148, 236, 236, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["st augustine", "fl", 80, "St. Augustine, FL", [178, 178, 178, 157, 157, 157, 157, 157, 157, 157, 157, 178]],
+  ["stuart", "fl", 80, "Stuart, FL", [154, 238, 238, 154, 154, 154, 154, 154, 154, 154, 154, 154]],
+  ["tallahassee", "fl", 80, "Tallahassee, FL", [138, 138, 138, 138, 113, 113, 113, 113, 113, 113, 113, 113]],
+  ["tampa", "fl", 80, "Tampa / St. Petersburg, FL", [155, 212, 212, 212, 155, 155, 155, 155, 155, 155, 155, 155]],
+  ["st petersburg", "fl", 80, "Tampa / St. Petersburg, FL", [155, 212, 212, 212, 155, 155, 155, 155, 155, 155, 155, 155]],
+  ["vero beach", "fl", 74, "Vero Beach, FL", [259, 259, 259, 259, 181, 181, 181, 181, 181, 181, 181, 259]],
   // GA
-  ["athens", "ga", 74, "Athens, GA"],
-  ["atlanta", "ga", 86, "Atlanta, GA"],
-  ["augusta", "ga", 74, "Augusta, GA"],
-  ["jekyll island", "ga", 86, "Jekyll Island / Brunswick, GA"],
-  ["brunswick", "ga", 86, "Jekyll Island / Brunswick, GA"],
-  ["marietta", "ga", 74, "Marietta, GA"],
-  ["savannah", "ga", 80, "Savannah, GA"],
+  ["athens", "ga", 74, "Athens, GA", [154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154]],
+  ["atlanta", "ga", 86, "Atlanta, GA", [207, 207, 207, 188, 188, 188, 188, 188, 188, 188, 188, 188]],
+  ["augusta", "ga", 74, "Augusta, GA", [131, 131, 131, 131, 113, 113, 131, 131, 131, 131, 131, 131]],
+  ["jekyll island", "ga", 86, "Jekyll Island / Brunswick, GA", [176, 176, 230, 230, 230, 230, 230, 176, 176, 176, 176, 176]],
+  ["brunswick", "ga", 86, "Jekyll Island / Brunswick, GA", [176, 176, 230, 230, 230, 230, 230, 176, 176, 176, 176, 176]],
+  ["marietta", "ga", 74, "Marietta, GA", [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131]],
+  ["savannah", "ga", 80, "Savannah, GA", [153, 153, 186, 186, 153, 153, 153, 153, 153, 153, 153, 153]],
   // IA
-  ["dallas", "ia", 80, "Dallas, IA"],
-  ["des moines", "ia", 80, "Des Moines, IA"],
+  ["dallas", "ia", 80, "Dallas, IA", [117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117]],
+  ["des moines", "ia", 80, "Des Moines, IA", [122, 122, 122, 122, 122, 122, 122, 122, 122, 122, 122, 122]],
   // ID
-  ["boise", "id", 86, "Boise, ID"],
-  ["coeur d alene", "id", 74, "Coeur d'Alene, ID"],
-  ["sun valley", "id", 80, "Sun Valley / Ketchum, ID"],
-  ["ketchum", "id", 80, "Sun Valley / Ketchum, ID"],
+  ["boise", "id", 86, "Boise, ID", [176, 176, 176, 176, 176, 201, 201, 201, 201, 201, 176, 176]],
+  ["coeur d alene", "id", 74, "Coeur d'Alene, ID", [148, 148, 148, 148, 148, 227, 227, 227, 148, 148, 148, 148]],
+  ["sun valley", "id", 80, "Sun Valley / Ketchum, ID", [316, 316, 316, 183, 183, 293, 293, 293, 293, 184, 184, 316]],
+  ["ketchum", "id", 80, "Sun Valley / Ketchum, ID", [316, 316, 316, 183, 183, 293, 293, 293, 293, 184, 184, 316]],
   // IL
-  ["bolingbrook", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
-  ["romeoville", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
-  ["lemont", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
-  ["chicago", "il", 92, "Chicago, IL"],
-  ["east st louis", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
-  ["o fallon", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
-  ["fairview heights", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
-  ["oakbrook terrace", "il", 80, "Oakbrook Terrace, IL"],
+  ["bolingbrook", "il", 74, "Bolingbrook / Romeoville / Lemont, IL", [119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119]],
+  ["romeoville", "il", 74, "Bolingbrook / Romeoville / Lemont, IL", [119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119]],
+  ["lemont", "il", 74, "Bolingbrook / Romeoville / Lemont, IL", [119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119]],
+  ["chicago", "il", 92, "Chicago, IL", [148, 148, 148, 238, 238, 238, 213, 213, 232, 232, 232, 148]],
+  ["east st louis", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["o fallon", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["fairview heights", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
+  ["oakbrook terrace", "il", 80, "Oakbrook Terrace, IL", [123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123]],
   // IN
-  ["bloomington", "in", 74, "Bloomington, IN"],
-  ["indianapolis", "in", 80, "Indianapolis / Carmel, IN"],
-  ["carmel", "in", 80, "Indianapolis / Carmel, IN"],
-  ["lafayette", "in", 74, "Lafayette / West Lafayette, IN"],
-  ["west lafayette", "in", 74, "Lafayette / West Lafayette, IN"],
+  ["bloomington", "in", 74, "Bloomington, IN", [121, 121, 121, 121, 154, 154, 154, 154, 121, 121, 121, 121]],
+  ["indianapolis", "in", 80, "Indianapolis / Carmel, IN", [140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140]],
+  ["carmel", "in", 80, "Indianapolis / Carmel, IN", [140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140]],
+  ["lafayette", "in", 74, "Lafayette / West Lafayette, IN", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["west lafayette", "in", 74, "Lafayette / West Lafayette, IN", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
   // KS
-  ["kansas city", "ks", 80, "Kansas City / Overland Park, KS"],
-  ["overland park", "ks", 80, "Kansas City / Overland Park, KS"],
+  ["kansas city", "ks", 80, "Kansas City / Overland Park, KS", [139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139]],
+  ["overland park", "ks", 80, "Kansas City / Overland Park, KS", [139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139]],
   // KY
-  ["boone", "ky", 68, "Boone, KY"],
-  ["kenton", "ky", 86, "Kenton, KY"],
-  ["lexington", "ky", 80, "Lexington, KY"],
-  ["louisville", "ky", 80, "Louisville, KY"],
+  ["boone", "ky", 68, "Boone, KY", [119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119, 119]],
+  ["kenton", "ky", 86, "Kenton, KY", [170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170]],
+  ["lexington", "ky", 80, "Lexington, KY", [125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125]],
+  ["louisville", "ky", 80, "Louisville, KY", [132, 185, 185, 185, 185, 158, 158, 158, 180, 180, 132, 132]],
   // LA
-  ["alexandria", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
-  ["leesville", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
-  ["natchitoches", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
-  ["new orleans", "la", 80, "New Orleans, LA"],
+  ["alexandria", "la", 68, "Alexandria / Leesville / Natchitoches, LA", [118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118]],
+  ["leesville", "la", 68, "Alexandria / Leesville / Natchitoches, LA", [118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118]],
+  ["natchitoches", "la", 68, "Alexandria / Leesville / Natchitoches, LA", [118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118]],
+  ["new orleans", "la", 80, "New Orleans, LA", [162, 188, 188, 188, 188, 138, 138, 138, 162, 162, 162, 162]],
   // MA
-  ["andover", "ma", 80, "Andover, MA"],
-  ["boston", "ma", 92, "Boston / Cambridge, MA"],
-  ["cambridge", "ma", 92, "Boston / Cambridge, MA"],
-  ["burlington", "ma", 86, "Burlington / Woburn, MA"],
-  ["woburn", "ma", 86, "Burlington / Woburn, MA"],
-  ["falmouth", "ma", 86, "Falmouth, MA"],
-  ["hyannis", "ma", 92, "Hyannis, MA"],
-  ["martha s vineyard", "ma", 92, "Martha's Vineyard, MA"],
-  ["nantucket", "ma", 92, "Nantucket, MA"],
-  ["northampton", "ma", 80, "Northampton, MA"],
-  ["pittsfield", "ma", 86, "Pittsfield, MA"],
-  ["plymouth", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
-  ["taunton", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
-  ["new bedford", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
-  ["quincy", "ma", 80, "Quincy, MA"],
-  ["springfield", "ma", 74, "Springfield, MA"],
-  ["worcester", "ma", 80, "Worcester, MA"],
+  ["andover", "ma", 80, "Andover, MA", [137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137]],
+  ["boston", "ma", 92, "Boston / Cambridge, MA", [213, 213, 305, 305, 305, 305, 305, 305, 365, 365, 213, 213]],
+  ["cambridge", "ma", 92, "Boston / Cambridge, MA", [213, 213, 305, 305, 305, 305, 305, 305, 365, 365, 213, 213]],
+  ["burlington", "ma", 86, "Burlington / Woburn, MA", [152, 152, 152, 152, 187, 187, 187, 187, 187, 187, 152, 152]],
+  ["woburn", "ma", 86, "Burlington / Woburn, MA", [152, 152, 152, 152, 187, 187, 187, 187, 187, 187, 152, 152]],
+  ["falmouth", "ma", 86, "Falmouth, MA", [138, 138, 138, 138, 138, 247, 247, 247, 138, 138, 138, 138]],
+  ["hyannis", "ma", 92, "Hyannis, MA", [131, 131, 131, 131, 131, 131, 220, 220, 131, 131, 131, 131]],
+  ["martha s vineyard", "ma", 92, "Martha's Vineyard, MA", [199, 199, 199, 199, 199, 473, 473, 473, 473, 199, 199, 199]],
+  ["nantucket", "ma", 92, "Nantucket, MA", [171, 171, 171, 171, 171, 487, 487, 487, 487, 171, 171, 171]],
+  ["northampton", "ma", 80, "Northampton, MA", [157, 157, 157, 157, 157, 157, 157, 157, 157, 157, 157, 157]],
+  ["pittsfield", "ma", 86, "Pittsfield, MA", [142, 142, 142, 142, 142, 142, 188, 188, 142, 142, 142, 142]],
+  ["plymouth", "ma", 80, "Plymouth / Taunton / New Bedford, MA", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["taunton", "ma", 80, "Plymouth / Taunton / New Bedford, MA", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["new bedford", "ma", 80, "Plymouth / Taunton / New Bedford, MA", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["quincy", "ma", 80, "Quincy, MA", [146, 146, 146, 146, 190, 190, 190, 190, 190, 190, 146, 146]],
+  ["springfield", "ma", 74, "Springfield, MA", [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131]],
+  ["worcester", "ma", 80, "Worcester, MA", [140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140]],
   // MD
-  ["aberdeen", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
-  ["bel air", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
-  ["belcamp", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
-  ["annapolis", "md", 80, "Annapolis, MD"],
-  ["baltimore city", "md", 86, "Baltimore City, MD"],
-  ["cambridge", "md", 80, "Cambridge / St. Michaels, MD"],
-  ["st michaels", "md", 80, "Cambridge / St. Michaels, MD"],
-  ["centreville", "md", 74, "Centreville, MD"],
-  ["columbia", "md", 86, "Columbia, MD"],
-  ["district of columbia", "md", 92, "District of Columbia, MD"],
-  ["ocean city", "md", 80, "Ocean City, MD"],
+  ["aberdeen", "md", 74, "Aberdeen / Bel Air / Belcamp, MD", [117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117]],
+  ["bel air", "md", 74, "Aberdeen / Bel Air / Belcamp, MD", [117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117]],
+  ["belcamp", "md", 74, "Aberdeen / Bel Air / Belcamp, MD", [117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117]],
+  ["annapolis", "md", 80, "Annapolis, MD", [130, 130, 130, 130, 169, 169, 169, 169, 169, 169, 130, 130]],
+  ["baltimore city", "md", 86, "Baltimore City, MD", [166, 166, 166, 166, 166, 166, 166, 166, 166, 166, 166, 166]],
+  ["cambridge", "md", 80, "Cambridge / St. Michaels, MD", [147, 147, 147, 147, 147, 195, 195, 195, 147, 147, 147, 147]],
+  ["st michaels", "md", 80, "Cambridge / St. Michaels, MD", [147, 147, 147, 147, 147, 195, 195, 195, 147, 147, 147, 147]],
+  ["centreville", "md", 74, "Centreville, MD", [127, 127, 127, 127, 164, 164, 164, 164, 164, 164, 127, 127]],
+  ["columbia", "md", 86, "Columbia, MD", [116, 116, 116, 116, 116, 116, 116, 116, 116, 116, 116, 116]],
+  ["district of columbia", "md", 92, "District of Columbia, MD", [203, 203, 295, 295, 295, 295, 192, 192, 287, 287, 203, 203]],
+  ["ocean city", "md", 80, "Ocean City, MD", [115, 115, 115, 115, 115, 306, 306, 306, 115, 115, 115, 115]],
   // ME
-  ["bar harbor", "me", 92, "Bar Harbor / Rockport, ME"],
-  ["rockport", "me", 92, "Bar Harbor / Rockport, ME"],
-  ["kennebunk", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
-  ["kittery", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
-  ["sanford", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
-  ["portland", "me", 80, "Portland, ME"],
+  ["bar harbor", "me", 92, "Bar Harbor / Rockport, ME", [137, 137, 137, 137, 212, 212, 320, 320, 276, 276, 137, 137]],
+  ["rockport", "me", 92, "Bar Harbor / Rockport, ME", [137, 137, 137, 137, 212, 212, 320, 320, 276, 276, 137, 137]],
+  ["kennebunk", "me", 86, "Kennebunk / Kittery / Sanford, ME", [130, 130, 130, 130, 130, 130, 229, 229, 184, 184, 130, 130]],
+  ["kittery", "me", 86, "Kennebunk / Kittery / Sanford, ME", [130, 130, 130, 130, 130, 130, 229, 229, 184, 184, 130, 130]],
+  ["sanford", "me", 86, "Kennebunk / Kittery / Sanford, ME", [130, 130, 130, 130, 130, 130, 229, 229, 184, 184, 130, 130]],
+  ["portland", "me", 80, "Portland, ME", [119, 119, 119, 119, 119, 216, 216, 216, 216, 216, 119, 119]],
   // MI
-  ["ann arbor", "mi", 80, "Ann Arbor, MI"],
-  ["detroit", "mi", 74, "Detroit, MI"],
-  ["grand rapids", "mi", 80, "Grand Rapids, MI"],
-  ["holland", "mi", 74, "Holland, MI"],
-  ["mackinac island", "mi", 86, "Mackinac Island, MI"],
-  ["midland", "mi", 74, "Midland, MI"],
-  ["muskegon", "mi", 68, "Muskegon, MI"],
-  ["petoskey", "mi", 86, "Petoskey, MI"],
-  ["pontiac", "mi", 80, "Pontiac / Auburn Hills, MI"],
-  ["auburn hills", "mi", 80, "Pontiac / Auburn Hills, MI"],
-  ["south haven", "mi", 68, "South Haven, MI"],
-  ["traverse city", "mi", 80, "Traverse City, MI"],
+  ["ann arbor", "mi", 80, "Ann Arbor, MI", [140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140]],
+  ["detroit", "mi", 74, "Detroit, MI", [160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160]],
+  ["grand rapids", "mi", 80, "Grand Rapids, MI", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["holland", "mi", 74, "Holland, MI", [118, 118, 118, 118, 158, 158, 158, 158, 118, 118, 118, 118]],
+  ["mackinac island", "mi", 86, "Mackinac Island, MI", [122, 122, 122, 122, 122, 122, 197, 197, 142, 142, 122, 122]],
+  ["midland", "mi", 74, "Midland, MI", [138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138]],
+  ["muskegon", "mi", 68, "Muskegon, MI", [113, 113, 113, 113, 113, 157, 157, 157, 113, 113, 113, 113]],
+  ["petoskey", "mi", 86, "Petoskey, MI", [123, 123, 123, 123, 123, 230, 230, 230, 179, 179, 123, 123]],
+  ["pontiac", "mi", 80, "Pontiac / Auburn Hills, MI", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["auburn hills", "mi", 80, "Pontiac / Auburn Hills, MI", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["south haven", "mi", 68, "South Haven, MI", [113, 113, 113, 113, 113, 148, 148, 148, 113, 113, 113, 113]],
+  ["traverse city", "mi", 80, "Traverse City, MI", [134, 134, 134, 134, 134, 134, 235, 235, 158, 158, 134, 134]],
   // MN
-  ["duluth", "mn", 86, "Duluth, MN"],
-  ["minneapolis", "mn", 92, "Minneapolis / St. Paul, MN"],
-  ["st paul", "mn", 92, "Minneapolis / St. Paul, MN"],
-  ["rochester", "mn", 80, "Rochester, MN"],
+  ["duluth", "mn", 86, "Duluth, MN", [159, 159, 159, 159, 159, 220, 220, 220, 220, 220, 159, 159]],
+  ["minneapolis", "mn", 92, "Minneapolis / St. Paul, MN", [153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153]],
+  ["st paul", "mn", 92, "Minneapolis / St. Paul, MN", [153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153]],
+  ["rochester", "mn", 80, "Rochester, MN", [139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139]],
   // MO
-  ["kansas city", "mo", 80, "Kansas City, MO"],
-  ["st louis", "mo", 86, "St. Louis, MO"],
+  ["kansas city", "mo", 80, "Kansas City, MO", [139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139, 139]],
+  ["st louis", "mo", 86, "St. Louis, MO", [156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156, 156]],
   // MS
-  ["oxford", "ms", 68, "Oxford, MS"],
-  ["southaven", "ms", 68, "Southaven, MS"],
-  ["starkville", "ms", 68, "Starkville, MS"],
+  ["oxford", "ms", 68, "Oxford, MS", [146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146, 146]],
+  ["southaven", "ms", 68, "Southaven, MS", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["starkville", "ms", 68, "Starkville, MS", [133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133]],
   // MT
-  ["big sky", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
-  ["west yellowstone", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
-  ["gardiner", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
-  ["helena", "mt", 74, "Helena, MT"],
-  ["kalispell", "mt", 80, "Kalispell/Whitefish, MT"],
-  ["whitefish", "mt", 80, "Kalispell/Whitefish, MT"],
-  ["missoula", "mt", 74, "Missoula, MT"],
+  ["big sky", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT", [169, 169, 169, 169, 169, 326, 326, 326, 326, 169, 169, 169]],
+  ["west yellowstone", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT", [169, 169, 169, 169, 169, 326, 326, 326, 326, 169, 169, 169]],
+  ["gardiner", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT", [169, 169, 169, 169, 169, 326, 326, 326, 326, 169, 169, 169]],
+  ["helena", "mt", 74, "Helena, MT", [140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140, 140]],
+  ["kalispell", "mt", 80, "Kalispell/Whitefish, MT", [126, 126, 126, 126, 126, 126, 244, 244, 244, 126, 126, 126]],
+  ["whitefish", "mt", 80, "Kalispell/Whitefish, MT", [126, 126, 126, 126, 126, 126, 244, 244, 244, 126, 126, 126]],
+  ["missoula", "mt", 74, "Missoula, MT", [135, 135, 135, 135, 135, 199, 199, 199, 199, 135, 135, 135]],
   // NC
-  ["asheville", "nc", 80, "Asheville, NC"],
-  ["atlantic beach", "nc", 74, "Atlantic Beach / Morehead City, NC"],
-  ["morehead city", "nc", 74, "Atlantic Beach / Morehead City, NC"],
-  ["chapel hill", "nc", 80, "Chapel Hill, NC"],
-  ["charlotte", "nc", 80, "Charlotte, NC"],
-  ["durham", "nc", 74, "Durham, NC"],
-  ["fayetteville", "nc", 68, "Fayetteville, NC"],
-  ["greensboro", "nc", 74, "Greensboro, NC"],
-  ["kill devil hills", "nc", 74, "Kill Devil Hills, NC"],
-  ["raleigh", "nc", 74, "Raleigh, NC"],
-  ["wilmington", "nc", 74, "Wilmington, NC"],
+  ["asheville", "nc", 80, "Asheville, NC", [125, 125, 125, 125, 125, 125, 125, 125, 125, 145, 145, 145]],
+  ["atlantic beach", "nc", 74, "Atlantic Beach / Morehead City, NC", [123, 123, 123, 123, 178, 178, 178, 178, 141, 141, 123, 123]],
+  ["morehead city", "nc", 74, "Atlantic Beach / Morehead City, NC", [123, 123, 123, 123, 178, 178, 178, 178, 141, 141, 123, 123]],
+  ["chapel hill", "nc", 80, "Chapel Hill, NC", [153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153]],
+  ["charlotte", "nc", 80, "Charlotte, NC", [143, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143]],
+  ["durham", "nc", 74, "Durham, NC", [124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124]],
+  ["fayetteville", "nc", 68, "Fayetteville, NC", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["greensboro", "nc", 74, "Greensboro, NC", [116, 116, 116, 130, 130, 130, 130, 130, 130, 130, 116, 116]],
+  ["kill devil hills", "nc", 74, "Kill Devil Hills, NC", [120, 120, 120, 190, 190, 267, 267, 267, 166, 166, 120, 120]],
+  ["raleigh", "nc", 74, "Raleigh, NC", [142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142]],
+  ["wilmington", "nc", 74, "Wilmington, NC", [113, 113, 145, 145, 145, 170, 170, 144, 144, 144, 113, 113]],
   // NE
-  ["omaha", "ne", 80, "Omaha, NE"],
+  ["omaha", "ne", 80, "Omaha, NE", [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128]],
   // NH
-  ["concord", "nh", 74, "Concord, NH"],
-  ["conway", "nh", 80, "Conway, NH"],
-  ["durham", "nh", 74, "Durham, NH"],
-  ["laconia", "nh", 74, "Laconia, NH"],
-  ["lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
-  ["lincoln", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
-  ["west lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
-  ["manchester", "nh", 74, "Manchester, NH"],
-  ["portsmouth", "nh", 74, "Portsmouth, NH"],
+  ["concord", "nh", 74, "Concord, NH", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["conway", "nh", 80, "Conway, NH", [131, 131, 131, 131, 131, 168, 168, 168, 168, 168, 131, 131]],
+  ["durham", "nh", 74, "Durham, NH", [127, 127, 127, 127, 127, 156, 156, 156, 127, 127, 127, 127]],
+  ["laconia", "nh", 74, "Laconia, NH", [145, 145, 145, 145, 145, 191, 191, 191, 191, 191, 145, 145]],
+  ["lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH", [150, 150, 150, 150, 150, 186, 186, 186, 186, 186, 150, 150]],
+  ["lincoln", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH", [150, 150, 150, 150, 150, 186, 186, 186, 186, 186, 150, 150]],
+  ["west lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH", [150, 150, 150, 150, 150, 186, 186, 186, 186, 186, 150, 150]],
+  ["manchester", "nh", 74, "Manchester, NH", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["portsmouth", "nh", 74, "Portsmouth, NH", [129, 129, 129, 129, 129, 186, 186, 186, 186, 186, 129, 129]],
   // NJ
-  ["cherry hill", "nj", 80, "Cherry Hill / Moorestown, NJ"],
-  ["moorestown", "nj", 80, "Cherry Hill / Moorestown, NJ"],
-  ["eatontown", "nj", 86, "Eatontown / Freehold, NJ"],
-  ["freehold", "nj", 86, "Eatontown / Freehold, NJ"],
-  ["edison", "nj", 80, "Edison / Piscataway, NJ"],
-  ["piscataway", "nj", 80, "Edison / Piscataway, NJ"],
-  ["flemington", "nj", 80, "Flemington, NJ"],
-  ["newark", "nj", 86, "Newark, NJ"],
-  ["parsippany", "nj", 80, "Parsippany, NJ"],
-  ["princeton", "nj", 86, "Princeton / Trenton, NJ"],
-  ["trenton", "nj", 86, "Princeton / Trenton, NJ"],
-  ["somerset", "nj", 80, "Somerset, NJ"],
-  ["springfield", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
-  ["cranford", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
-  ["new providence", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
-  ["toms river", "nj", 74, "Toms River, NJ"],
+  ["cherry hill", "nj", 80, "Cherry Hill / Moorestown, NJ", [115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115]],
+  ["moorestown", "nj", 80, "Cherry Hill / Moorestown, NJ", [115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115]],
+  ["eatontown", "nj", 86, "Eatontown / Freehold, NJ", [148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["freehold", "nj", 86, "Eatontown / Freehold, NJ", [148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["edison", "nj", 80, "Edison / Piscataway, NJ", [123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123]],
+  ["piscataway", "nj", 80, "Edison / Piscataway, NJ", [123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123]],
+  ["flemington", "nj", 80, "Flemington, NJ", [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128]],
+  ["newark", "nj", 86, "Newark, NJ", [164, 164, 164, 164, 164, 164, 164, 164, 175, 175, 175, 175]],
+  ["parsippany", "nj", 80, "Parsippany, NJ", [148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148]],
+  ["princeton", "nj", 86, "Princeton / Trenton, NJ", [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]],
+  ["trenton", "nj", 86, "Princeton / Trenton, NJ", [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]],
+  ["somerset", "nj", 80, "Somerset, NJ", [147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147, 147]],
+  ["springfield", "nj", 80, "Springfield / Cranford / New Providence, NJ", [141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141]],
+  ["cranford", "nj", 80, "Springfield / Cranford / New Providence, NJ", [141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141]],
+  ["new providence", "nj", 80, "Springfield / Cranford / New Providence, NJ", [141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141]],
+  ["toms river", "nj", 74, "Toms River, NJ", [169, 169, 169, 169, 169, 217, 217, 217, 169, 169, 169, 169]],
   // NM
-  ["albuquerque", "nm", 80, "Albuquerque, NM"],
-  ["carlsbad", "nm", 74, "Carlsbad, NM"],
-  ["santa fe", "nm", 80, "Santa Fe, NM"],
-  ["taos", "nm", 74, "Taos, NM"],
+  ["albuquerque", "nm", 80, "Albuquerque, NM", [208, 208, 208, 154, 154, 154, 154, 154, 154, 208, 208, 208]],
+  ["carlsbad", "nm", 74, "Carlsbad, NM", [164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164]],
+  ["santa fe", "nm", 80, "Santa Fe, NM", [129, 129, 175, 175, 175, 175, 175, 175, 175, 175, 148, 148]],
+  ["taos", "nm", 74, "Taos, NM", [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128]],
   // NV
-  ["incline village", "nv", 80, "Incline Village / Reno / Sparks, NV"],
-  ["reno", "nv", 80, "Incline Village / Reno / Sparks, NV"],
-  ["sparks", "nv", 80, "Incline Village / Reno / Sparks, NV"],
-  ["las vegas", "nv", 86, "Las Vegas, NV"],
+  ["incline village", "nv", 80, "Incline Village / Reno / Sparks, NV", [156, 156, 156, 156, 156, 183, 183, 183, 156, 156, 156, 156]],
+  ["reno", "nv", 80, "Incline Village / Reno / Sparks, NV", [156, 156, 156, 156, 156, 183, 183, 183, 156, 156, 156, 156]],
+  ["sparks", "nv", 80, "Incline Village / Reno / Sparks, NV", [156, 156, 156, 156, 156, 183, 183, 183, 156, 156, 156, 156]],
+  ["las vegas", "nv", 86, "Las Vegas, NV", [173, 173, 173, 120, 120, 120, 120, 120, 147, 147, 147, 147]],
   // NY
-  ["albany", "ny", 86, "Albany, NY"],
-  ["binghamton", "ny", 74, "Binghamton, NY"],
-  ["buffalo", "ny", 80, "Buffalo, NY"],
-  ["floral park", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
-  ["garden city", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
-  ["great neck", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
-  ["glens falls", "ny", 86, "Glens Falls, NY"],
-  ["ithaca", "ny", 80, "Ithaca, NY"],
-  ["kingston", "ny", 86, "Kingston, NY"],
-  ["lake placid", "ny", 86, "Lake Placid, NY"],
-  ["new york city", "ny", 92, "New York City, NY"],
-  ["niagara falls", "ny", 80, "Niagara Falls, NY"],
-  ["nyack", "ny", 80, "Nyack / Palisades, NY"],
-  ["palisades", "ny", 80, "Nyack / Palisades, NY"],
-  ["poughkeepsie", "ny", 80, "Poughkeepsie, NY"],
-  ["riverhead", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
-  ["ronkonkoma", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
-  ["melville", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
-  ["rochester", "ny", 80, "Rochester, NY"],
-  ["saratoga springs", "ny", 80, "Saratoga Springs / Schenectady, NY"],
-  ["schenectady", "ny", 80, "Saratoga Springs / Schenectady, NY"],
-  ["syracuse", "ny", 80, "Syracuse / Oswego, NY"],
-  ["oswego", "ny", 80, "Syracuse / Oswego, NY"],
-  ["tarrytown", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
-  ["white plains", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
-  ["new rochelle", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
-  ["troy", "ny", 80, "Troy, NY"],
-  ["west point", "ny", 80, "West Point, NY"],
+  ["albany", "ny", 86, "Albany, NY", [133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133]],
+  ["binghamton", "ny", 74, "Binghamton, NY", [127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127]],
+  ["buffalo", "ny", 80, "Buffalo, NY", [144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144]],
+  ["floral park", "ny", 86, "Floral Park / Garden City / Great Neck, NY", [172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172]],
+  ["garden city", "ny", 86, "Floral Park / Garden City / Great Neck, NY", [172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172]],
+  ["great neck", "ny", 86, "Floral Park / Garden City / Great Neck, NY", [172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172, 172]],
+  ["glens falls", "ny", 86, "Glens Falls, NY", [121, 121, 121, 121, 121, 121, 195, 195, 121, 121, 121, 121]],
+  ["ithaca", "ny", 80, "Ithaca, NY", [145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145]],
+  ["kingston", "ny", 86, "Kingston, NY", [141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141]],
+  ["lake placid", "ny", 86, "Lake Placid, NY", [170, 170, 145, 145, 145, 145, 225, 225, 170, 170, 170, 170]],
+  ["new york city", "ny", 92, "New York City, NY", [189, 189, 296, 296, 296, 296, 250, 250, 358, 358, 358, 358]],
+  ["niagara falls", "ny", 80, "Niagara Falls, NY", [113, 113, 113, 113, 113, 148, 148, 148, 113, 113, 113, 113]],
+  ["nyack", "ny", 80, "Nyack / Palisades, NY", [134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134]],
+  ["palisades", "ny", 80, "Nyack / Palisades, NY", [134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134, 134]],
+  ["poughkeepsie", "ny", 80, "Poughkeepsie, NY", [124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124]],
+  ["riverhead", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY", [163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163]],
+  ["ronkonkoma", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY", [163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163]],
+  ["melville", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY", [163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163, 163]],
+  ["rochester", "ny", 80, "Rochester, NY", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["saratoga springs", "ny", 80, "Saratoga Springs / Schenectady, NY", [137, 137, 137, 137, 137, 137, 219, 219, 137, 137, 137, 137]],
+  ["schenectady", "ny", 80, "Saratoga Springs / Schenectady, NY", [137, 137, 137, 137, 137, 137, 219, 219, 137, 137, 137, 137]],
+  ["syracuse", "ny", 80, "Syracuse / Oswego, NY", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["oswego", "ny", 80, "Syracuse / Oswego, NY", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["tarrytown", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY", [168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168]],
+  ["white plains", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY", [168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168]],
+  ["new rochelle", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY", [168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168, 168]],
+  ["troy", "ny", 80, "Troy, NY", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["west point", "ny", 80, "West Point, NY", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
   // OH
-  ["cincinnati", "oh", 86, "Cincinnati, OH"],
-  ["cleveland", "oh", 80, "Cleveland, OH"],
-  ["columbus", "oh", 80, "Columbus, OH"],
-  ["dayton", "oh", 74, "Dayton / Fairborn, OH"],
-  ["fairborn", "oh", 74, "Dayton / Fairborn, OH"],
-  ["hamilton", "oh", 74, "Hamilton, OH"],
-  ["sandusky", "oh", 68, "Sandusky, OH"],
+  ["cincinnati", "oh", 86, "Cincinnati, OH", [170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170]],
+  ["cleveland", "oh", 80, "Cleveland, OH", [167, 167, 167, 167, 167, 167, 167, 167, 167, 167, 167, 167]],
+  ["columbus", "oh", 80, "Columbus, OH", [138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138]],
+  ["dayton", "oh", 74, "Dayton / Fairborn, OH", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["fairborn", "oh", 74, "Dayton / Fairborn, OH", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["hamilton", "oh", 74, "Hamilton, OH", [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131]],
+  ["sandusky", "oh", 68, "Sandusky, OH", [127, 127, 127, 127, 127, 174, 174, 174, 120, 120, 120, 127]],
   // OK
-  ["oklahoma city", "ok", 80, "Oklahoma City, OK"],
+  ["oklahoma city", "ok", 80, "Oklahoma City, OK", [121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121]],
   // OR
-  ["beaverton", "or", 80, "Beaverton, OR"],
-  ["bend", "or", 86, "Bend, OR"],
-  ["clackamas", "or", 80, "Clackamas, OR"],
-  ["eugene", "or", 80, "Eugene / Florence, OR"],
-  ["florence", "or", 80, "Eugene / Florence, OR"],
-  ["lincoln city", "or", 92, "Lincoln City, OR"],
-  ["portland", "or", 86, "Portland, OR"],
-  ["seaside", "or", 86, "Seaside, OR"],
+  ["beaverton", "or", 80, "Beaverton, OR", [138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138, 138]],
+  ["bend", "or", 86, "Bend, OR", [123, 123, 123, 123, 123, 195, 195, 195, 154, 154, 123, 123]],
+  ["clackamas", "or", 80, "Clackamas, OR", [137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137]],
+  ["eugene", "or", 80, "Eugene / Florence, OR", [146, 146, 146, 146, 146, 202, 202, 146, 146, 146, 146, 146]],
+  ["florence", "or", 80, "Eugene / Florence, OR", [146, 146, 146, 146, 146, 202, 202, 146, 146, 146, 146, 146]],
+  ["lincoln city", "or", 92, "Lincoln City, OR", [127, 127, 127, 127, 127, 127, 178, 178, 127, 127, 127, 127]],
+  ["portland", "or", 86, "Portland, OR", [161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161]],
+  ["seaside", "or", 86, "Seaside, OR", [145, 145, 145, 145, 145, 145, 237, 237, 145, 145, 145, 145]],
   // PA
-  ["bucks", "pa", 80, "Bucks, PA"],
-  ["chester", "pa", 80, "Chester / Radnor / Essington, PA"],
-  ["radnor", "pa", 80, "Chester / Radnor / Essington, PA"],
-  ["essington", "pa", 80, "Chester / Radnor / Essington, PA"],
-  ["gettysburg", "pa", 68, "Gettysburg, PA"],
-  ["harrisburg", "pa", 74, "Harrisburg, PA"],
-  ["hershey", "pa", 80, "Hershey, PA"],
-  ["lancaster", "pa", 74, "Lancaster, PA"],
-  ["malvern", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
-  ["frazer", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
-  ["berwyn", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
-  ["montgomery", "pa", 80, "Montgomery, PA"],
-  ["philadelphia", "pa", 92, "Philadelphia, PA"],
-  ["pittsburgh", "pa", 80, "Pittsburgh, PA"],
-  ["reading", "pa", 74, "Reading, PA"],
-  ["state college", "pa", 74, "State College, PA"],
+  ["bucks", "pa", 80, "Bucks, PA", [121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121]],
+  ["chester", "pa", 80, "Chester / Radnor / Essington, PA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["radnor", "pa", 80, "Chester / Radnor / Essington, PA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["essington", "pa", 80, "Chester / Radnor / Essington, PA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["gettysburg", "pa", 68, "Gettysburg, PA", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["harrisburg", "pa", 74, "Harrisburg, PA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["hershey", "pa", 80, "Hershey, PA", [151, 151, 151, 151, 151, 207, 207, 207, 151, 151, 151, 151]],
+  ["lancaster", "pa", 74, "Lancaster, PA", [125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125]],
+  ["malvern", "pa", 80, "Malvern / Frazer / Berwyn, PA", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["frazer", "pa", 80, "Malvern / Frazer / Berwyn, PA", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["berwyn", "pa", 80, "Malvern / Frazer / Berwyn, PA", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
+  ["montgomery", "pa", 80, "Montgomery, PA", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["philadelphia", "pa", 92, "Philadelphia, PA", [185, 185, 185, 185, 185, 185, 174, 174, 227, 227, 227, 185]],
+  ["pittsburgh", "pa", 80, "Pittsburgh, PA", [144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144]],
+  ["reading", "pa", 74, "Reading, PA", [122, 122, 122, 122, 122, 122, 122, 122, 122, 122, 122, 122]],
+  ["state college", "pa", 74, "State College, PA", [132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132]],
   // RI
-  ["jamestown", "ri", 80, "Jamestown / Middletown / Newport, RI"],
-  ["middletown", "ri", 80, "Jamestown / Middletown / Newport, RI"],
-  ["newport", "ri", 80, "Jamestown / Middletown / Newport, RI"],
-  ["providence", "ri", 80, "Providence / Bristol, RI"],
-  ["bristol", "ri", 80, "Providence / Bristol, RI"],
+  ["jamestown", "ri", 80, "Jamestown / Middletown / Newport, RI", [150, 150, 150, 150, 150, 274, 274, 274, 236, 236, 150, 150]],
+  ["middletown", "ri", 80, "Jamestown / Middletown / Newport, RI", [150, 150, 150, 150, 150, 274, 274, 274, 236, 236, 150, 150]],
+  ["newport", "ri", 80, "Jamestown / Middletown / Newport, RI", [150, 150, 150, 150, 150, 274, 274, 274, 236, 236, 150, 150]],
+  ["providence", "ri", 80, "Providence / Bristol, RI", [161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161]],
+  ["bristol", "ri", 80, "Providence / Bristol, RI", [161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161]],
   // SC
-  ["charleston", "sc", 92, "Charleston, SC"],
-  ["columbia", "sc", 74, "Columbia, SC"],
-  ["hilton head", "sc", 80, "Hilton Head, SC"],
-  ["myrtle beach", "sc", 74, "Myrtle Beach, SC"],
+  ["charleston", "sc", 92, "Charleston, SC", [218, 218, 288, 288, 288, 244, 244, 244, 244, 244, 218, 218]],
+  ["columbia", "sc", 74, "Columbia, SC", [115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115, 115]],
+  ["hilton head", "sc", 80, "Hilton Head, SC", [132, 132, 132, 207, 207, 226, 226, 226, 171, 171, 132, 132]],
+  ["myrtle beach", "sc", 74, "Myrtle Beach, SC", [113, 113, 147, 147, 147, 202, 202, 202, 135, 135, 113, 113]],
   // SD
-  ["deadwood", "sd", 80, "Deadwood / Spearfish, SD"],
-  ["spearfish", "sd", 80, "Deadwood / Spearfish, SD"],
-  ["hot springs", "sd", 74, "Hot Springs, SD"],
-  ["rapid city", "sd", 74, "Rapid City, SD"],
+  ["deadwood", "sd", 80, "Deadwood / Spearfish, SD", [113, 113, 113, 113, 113, 168, 168, 168, 168, 113, 113, 113]],
+  ["spearfish", "sd", 80, "Deadwood / Spearfish, SD", [113, 113, 113, 113, 113, 168, 168, 168, 168, 113, 113, 113]],
+  ["hot springs", "sd", 74, "Hot Springs, SD", [113, 113, 113, 113, 113, 161, 161, 161, 161, 113, 113, 113]],
+  ["rapid city", "sd", 74, "Rapid City, SD", [113, 113, 113, 113, 113, 173, 173, 173, 113, 113, 113, 113]],
   // TN
-  ["brentwood", "tn", 86, "Brentwood / Franklin, TN"],
-  ["franklin", "tn", 86, "Brentwood / Franklin, TN"],
-  ["chattanooga", "tn", 74, "Chattanooga, TN"],
-  ["knoxville", "tn", 74, "Knoxville, TN"],
-  ["memphis", "tn", 74, "Memphis, TN"],
-  ["nashville", "tn", 86, "Nashville, TN"],
+  ["brentwood", "tn", 86, "Brentwood / Franklin, TN", [135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135]],
+  ["franklin", "tn", 86, "Brentwood / Franklin, TN", [135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135]],
+  ["chattanooga", "tn", 74, "Chattanooga, TN", [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]],
+  ["knoxville", "tn", 74, "Knoxville, TN", [129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129]],
+  ["memphis", "tn", 74, "Memphis, TN", [135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135, 135]],
+  ["nashville", "tn", 86, "Nashville, TN", [230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230]],
   // TX
-  ["arlington", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
-  ["fort worth", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
-  ["grapevine", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
-  ["austin", "tx", 80, "Austin, TX"],
-  ["big spring", "tx", 68, "Big Spring, TX"],
-  ["dallas", "tx", 80, "Dallas, TX"],
-  ["galveston", "tx", 74, "Galveston, TX"],
-  ["houston", "tx", 80, "Houston, TX"],
-  ["midland", "tx", 74, "Midland / Odessa, TX"],
-  ["odessa", "tx", 74, "Midland / Odessa, TX"],
-  ["pecos", "tx", 74, "Pecos, TX"],
-  ["plano", "tx", 80, "Plano, TX"],
-  ["san antonio", "tx", 74, "San Antonio, TX"],
-  ["south padre island", "tx", 74, "South Padre Island, TX"],
+  ["arlington", "tx", 80, "Arlington / Fort Worth / Grapevine, TX", [192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192]],
+  ["fort worth", "tx", 80, "Arlington / Fort Worth / Grapevine, TX", [192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192]],
+  ["grapevine", "tx", 80, "Arlington / Fort Worth / Grapevine, TX", [192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192]],
+  ["austin", "tx", 80, "Austin, TX", [184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184]],
+  ["big spring", "tx", 68, "Big Spring, TX", [133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133]],
+  ["dallas", "tx", 80, "Dallas, TX", [184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184]],
+  ["galveston", "tx", 74, "Galveston, TX", [116, 116, 116, 116, 116, 154, 154, 116, 116, 116, 116, 116]],
+  ["houston", "tx", 80, "Houston, TX", [133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133]],
+  ["midland", "tx", 74, "Midland / Odessa, TX", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["odessa", "tx", 74, "Midland / Odessa, TX", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["pecos", "tx", 74, "Pecos, TX", [125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125]],
+  ["plano", "tx", 80, "Plano, TX", [133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133]],
+  ["san antonio", "tx", 74, "San Antonio, TX", [149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149, 149]],
+  ["south padre island", "tx", 74, "South Padre Island, TX", [123, 123, 140, 140, 140, 160, 160, 123, 123, 123, 123, 123]],
   // UT
-  ["moab", "ut", 86, "Moab, UT"],
-  ["park city", "ut", 92, "Park City, UT"],
-  ["provo", "ut", 74, "Provo, UT"],
-  ["salt lake city", "ut", 80, "Salt Lake City, UT"],
+  ["moab", "ut", 86, "Moab, UT", [113, 113, 212, 212, 212, 212, 165, 165, 223, 223, 113, 113]],
+  ["park city", "ut", 92, "Park City, UT", [499, 499, 499, 227, 227, 227, 227, 227, 227, 227, 227, 499]],
+  ["provo", "ut", 74, "Provo, UT", [130, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130]],
+  ["salt lake city", "ut", 80, "Salt Lake City, UT", [152, 152, 152, 152, 152, 152, 152, 152, 152, 152, 152, 152]],
   // VA
-  ["blacksburg", "va", 68, "Blacksburg, VA"],
-  ["charlottesville", "va", 80, "Charlottesville, VA"],
-  ["district of columbia", "va", 92, "District of Columbia, VA"],
-  ["loudoun", "va", 80, "Loudoun, VA"],
-  ["lynchburg", "va", 68, "Lynchburg, VA"],
-  ["richmond", "va", 80, "Richmond, VA"],
-  ["roanoke", "va", 74, "Roanoke, VA"],
-  ["virginia beach", "va", 74, "Virginia Beach, VA"],
-  ["wallops island", "va", 68, "Wallops Island, VA"],
-  ["williamsburg", "va", 80, "Williamsburg / York, VA"],
-  ["york", "va", 80, "Williamsburg / York, VA"],
+  ["blacksburg", "va", 68, "Blacksburg, VA", [126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126]],
+  ["charlottesville", "va", 80, "Charlottesville, VA", [142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142]],
+  ["district of columbia", "va", 92, "District of Columbia, VA", [203, 203, 295, 295, 295, 295, 192, 192, 287, 287, 203, 203]],
+  ["loudoun", "va", 80, "Loudoun, VA", [121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121]],
+  ["lynchburg", "va", 68, "Lynchburg, VA", [124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124]],
+  ["richmond", "va", 80, "Richmond, VA", [161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161]],
+  ["roanoke", "va", 74, "Roanoke, VA", [125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125]],
+  ["virginia beach", "va", 74, "Virginia Beach, VA", [129, 129, 129, 129, 129, 212, 212, 212, 129, 129, 129, 129]],
+  ["wallops island", "va", 68, "Wallops Island, VA", [132, 132, 132, 132, 132, 132, 262, 262, 132, 132, 132, 132]],
+  ["williamsburg", "va", 80, "Williamsburg / York, VA", [113, 113, 135, 135, 135, 135, 135, 135, 113, 113, 113, 113]],
+  ["york", "va", 80, "Williamsburg / York, VA", [113, 113, 135, 135, 135, 135, 135, 135, 113, 113, 113, 113]],
   // VT
-  ["burlington", "vt", 86, "Burlington, VT"],
-  ["manchester", "vt", 86, "Manchester, VT"],
-  ["montpelier", "vt", 74, "Montpelier, VT"],
-  ["stowe", "vt", 86, "Stowe, VT"],
-  ["white river junction", "vt", 86, "White River Junction, VT"],
+  ["burlington", "vt", 86, "Burlington, VT", [131, 131, 131, 131, 202, 202, 202, 214, 214, 214, 131, 131]],
+  ["manchester", "vt", 86, "Manchester, VT", [171, 171, 171, 171, 171, 171, 223, 223, 223, 223, 171, 171]],
+  ["montpelier", "vt", 74, "Montpelier, VT", [167, 167, 167, 167, 167, 209, 209, 227, 227, 227, 167, 167]],
+  ["stowe", "vt", 86, "Stowe, VT", [184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184, 184]],
+  ["white river junction", "vt", 86, "White River Junction, VT", [134, 134, 134, 134, 134, 172, 172, 172, 172, 172, 134, 134]],
   // WA
-  ["everett", "wa", 86, "Everett / Lynnwood, WA"],
-  ["lynnwood", "wa", 86, "Everett / Lynnwood, WA"],
-  ["ocean shores", "wa", 86, "Ocean Shores, WA"],
-  ["olympia", "wa", 80, "Olympia / Tumwater, WA"],
-  ["tumwater", "wa", 80, "Olympia / Tumwater, WA"],
-  ["port angeles", "wa", 92, "Port Angeles / Port Townsend, WA"],
-  ["port townsend", "wa", 92, "Port Angeles / Port Townsend, WA"],
-  ["richland", "wa", 86, "Richland / Pasco, WA"],
-  ["pasco", "wa", 86, "Richland / Pasco, WA"],
-  ["seattle", "wa", 92, "Seattle, WA"],
-  ["spokane", "wa", 86, "Spokane, WA"],
-  ["tacoma", "wa", 86, "Tacoma, WA"],
-  ["vancouver", "wa", 86, "Vancouver, WA"],
+  ["everett", "wa", 86, "Everett / Lynnwood, WA", [120, 120, 120, 120, 120, 147, 147, 147, 120, 120, 120, 120]],
+  ["lynnwood", "wa", 86, "Everett / Lynnwood, WA", [120, 120, 120, 120, 120, 147, 147, 147, 120, 120, 120, 120]],
+  ["ocean shores", "wa", 86, "Ocean Shores, WA", [136, 136, 136, 136, 136, 136, 155, 155, 136, 136, 136, 136]],
+  ["olympia", "wa", 80, "Olympia / Tumwater, WA", [149, 149, 149, 149, 149, 176, 176, 176, 149, 149, 149, 149]],
+  ["tumwater", "wa", 80, "Olympia / Tumwater, WA", [149, 149, 149, 149, 149, 176, 176, 176, 149, 149, 149, 149]],
+  ["port angeles", "wa", 92, "Port Angeles / Port Townsend, WA", [131, 131, 131, 131, 131, 252, 252, 252, 252, 131, 131, 131]],
+  ["port townsend", "wa", 92, "Port Angeles / Port Townsend, WA", [131, 131, 131, 131, 131, 252, 252, 252, 252, 131, 131, 131]],
+  ["richland", "wa", 86, "Richland / Pasco, WA", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["pasco", "wa", 86, "Richland / Pasco, WA", [136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136, 136]],
+  ["seattle", "wa", 92, "Seattle, WA", [188, 188, 188, 188, 188, 255, 255, 255, 255, 255, 188, 188]],
+  ["spokane", "wa", 86, "Spokane, WA", [126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126]],
+  ["tacoma", "wa", 86, "Tacoma, WA", [143, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143]],
+  ["vancouver", "wa", 86, "Vancouver, WA", [161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161, 161]],
   // WI
-  ["madison", "wi", 80, "Madison, WI"],
-  ["milwaukee", "wi", 80, "Milwaukee, WI"],
-  ["sturgeon bay", "wi", 80, "Sturgeon Bay, WI"],
+  ["madison", "wi", 80, "Madison, WI", [113, 113, 113, 138, 138, 138, 138, 138, 138, 138, 113, 113]],
+  ["milwaukee", "wi", 80, "Milwaukee, WI", [144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144]],
+  ["sturgeon bay", "wi", 80, "Sturgeon Bay, WI", [113, 113, 113, 113, 113, 139, 139, 139, 139, 139, 113, 113]],
   // WV
-  ["charles town", "wv", 68, "Charles Town, WV"],
-  ["charleston", "wv", 68, "Charleston, WV"],
+  ["charles town", "wv", 68, "Charles Town, WV", [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128]],
+  ["charleston", "wv", 68, "Charleston, WV", [117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117, 117]],
   // WY
-  ["cody", "wy", 74, "Cody, WY"],
-  ["jackson", "wy", 92, "Jackson / Pinedale, WY"],
-  ["pinedale", "wy", 92, "Jackson / Pinedale, WY"],
+  ["cody", "wy", 74, "Cody, WY", [128, 128, 128, 128, 128, 213, 213, 213, 213, 128, 128, 128]],
+  ["jackson", "wy", 92, "Jackson / Pinedale, WY", [215, 215, 215, 215, 215, 441, 441, 441, 441, 215, 215, 215]],
+  ["pinedale", "wy", 92, "Jackson / Pinedale, WY", [215, 215, 215, 215, 215, 441, 441, 441, 441, 215, 215, 215]],
 ];
 
 // GSA FY 2027 exact M&IE meal dollar breakdowns by rate tier
@@ -938,6 +998,16 @@ const NYC_RATE = 92;
 const MN_RATE = 92;
 const STANDARD_RATE = 68;
 
+// Lodging caps ($/night), by calendar month [Jan..Dec]. Source: GSA FY2027 conus/lodging data.
+const NYC_LODGING = [189, 189, 296, 296, 296, 296, 250, 250, 358, 358, 358, 358];
+const MN_LODGING = [153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153, 153];
+const STANDARD_LODGING = [113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113];
+
+let currentLodging = STANDARD_LODGING; // array of 12 monthly caps for the selected location
+let lodgingMode = 'separate'; // 'separate' | 'gsa'
+let manualLodgingRate = null; // used only when location has no known lodging table (manual M&IE entry)
+let nights = []; // { date, included, lodgingRate }
+
 let currentMIE = 0;
 let days = [];
 
@@ -952,18 +1022,20 @@ function handleLocationPreset() {
   document.getElementById('lookupNote').style.display = 'none';
 
   if (val === 'nyc') {
-    setRate(NYC_RATE, 'New York City, NY — NSA rate');
+    setRate(NYC_RATE, 'New York City, NY — NSA rate', NYC_LODGING);
   } else if (val === 'mn') {
-    setRate(MN_RATE, 'Minneapolis / St. Paul, MN — NSA rate');
+    setRate(MN_RATE, 'Minneapolis / St. Paul, MN — NSA rate', MN_LODGING);
   } else if (val === 'other') {
     document.getElementById('otherCityField').style.display = '';
     document.getElementById('rateDisplay').style.display = 'none';
     document.getElementById('lookupNote').style.display = '';
     document.getElementById('lookupNoteText').textContent = 'Enter city and state to look up the rate.';
     currentMIE = 0;
+    currentLodging = null;
   } else {
     document.getElementById('rateDisplay').style.display = 'none';
     currentMIE = 0;
+    currentLodging = null;
   }
   rebuildDays();
 }
@@ -1002,7 +1074,7 @@ function lookupOtherCity() {
   }
 
   if (match) {
-    setRate(match[2], match[3] + ' — GSA rate');
+    setRate(match[2], match[3] + ' — GSA rate', match[4]);
     document.getElementById('manualRateField').style.display = 'none';
     document.getElementById('lookupNote').style.display = 'none';
   } else if (cityPart.length > 2) {
@@ -1019,15 +1091,19 @@ function applyManualRate() {
   const v = parseFloat(document.getElementById('manualRate').value);
   if (!isNaN(v) && v > 0) {
     const city = document.getElementById('otherCity').value || 'Other location';
-    setRate(v, city + ' — manually entered');
+    // Manually entered locations have no known monthly lodging table.
+    // Fall back to the flat standard lodging rate unless the employee overrides it.
+    setRate(v, city + ' — manually entered', STANDARD_LODGING);
   }
 }
 
-function setRate(rate, label) {
+function setRate(rate, label, lodgingArr) {
   currentMIE = rate;
+  currentLodging = lodgingArr || null;
   document.getElementById('rateVal').textContent = fmt(rate) + '/day';
   document.getElementById('rateSource').textContent = label;
   document.getElementById('rateDisplay').style.display = '';
+  updateLodgingAvailability();
   rebuildDays();
 }
 
@@ -1066,6 +1142,7 @@ function rebuildDays() {
   if (start && end && end < start) {
     dateError.style.display = '';
     document.getElementById('dailySection').style.display = 'none';
+    document.getElementById('lodgingSection').style.display = 'none';
     document.getElementById('totalsSection').style.display = 'none';
     document.getElementById('printBtn').style.display = 'none';
     document.getElementById('printNote').style.display = 'none';
@@ -1076,6 +1153,7 @@ function rebuildDays() {
 
   if (!start || !end || currentMIE === 0) {
     document.getElementById('dailySection').style.display = 'none';
+    document.getElementById('lodgingSection').style.display = 'none';
     document.getElementById('totalsSection').style.display = 'none';
     document.getElementById('printBtn').style.display = 'none';
     document.getElementById('printNote').style.display = 'none';
@@ -1144,7 +1222,9 @@ function rebuildDays() {
   });
 
   renderTable();
+  rebuildNights(dates);
   document.getElementById('dailySection').style.display = '';
+  document.getElementById('lodgingSection').style.display = '';
   document.getElementById('totalsSection').style.display = '';
   document.getElementById('printBtn').style.display = '';
   document.getElementById('printNote').style.display = '';
@@ -1255,9 +1335,142 @@ function calcTotals() {
   // Incidentals: flat $5/day per GSA (not subject to 75% travel day reduction)
   const totalInc = days.length * bd.incidentals;
 
+  const totalLodging = lodgingMode === 'gsa' ? calcLodgingTotal() : 0;
+
   document.getElementById('totalMeals').textContent = fmt(totalMeals);
   document.getElementById('totalIncidentals').textContent = fmt(totalInc);
-  document.getElementById('totalReimb').textContent = fmt(totalMeals + totalInc);
+  document.getElementById('totalLodging').textContent = fmt(totalLodging);
+  document.getElementById('totalReimb').textContent = fmt(totalMeals + totalInc + totalLodging);
+}
+
+// ── LODGING ──
+
+function setLodgingMode(mode) {
+  lodgingMode = mode;
+  const gsaPanel = document.getElementById('lodgingGSAPanel');
+  const lodgingCard = document.getElementById('lodgingCard');
+  const totalsGrid = document.getElementById('totalsGrid');
+  const separateNote = document.getElementById('lodgingSeparateNote');
+
+  if (mode === 'gsa') {
+    gsaPanel.style.display = '';
+    lodgingCard.style.display = '';
+    totalsGrid.classList.add('four-col');
+    separateNote.style.display = 'none';
+    updateLodgingAvailability();
+    renderNightsTable();
+  } else {
+    gsaPanel.style.display = 'none';
+    lodgingCard.style.display = 'none';
+    totalsGrid.classList.remove('four-col');
+    separateNote.style.display = '';
+  }
+  calcTotals();
+}
+
+function updateLodgingAvailability() {
+  // Show the manual override field only when we're on the flat standard-lodging
+  // fallback (i.e. no seasonal GSA table is known for the selected location).
+  const manualField = document.getElementById('manualLodgingField');
+  if (!manualField) return;
+  const usingFallback = currentLodging === STANDARD_LODGING;
+  manualField.style.display = usingFallback ? '' : 'none';
+  if (!usingFallback) manualLodgingRate = null;
+}
+
+function applyManualLodgingRate() {
+  const v = parseFloat(document.getElementById('manualLodgingRate').value);
+  manualLodgingRate = (!isNaN(v) && v > 0) ? v : null;
+  renderNightsTable();
+  calcTotals();
+}
+
+function monthIndexOf(dateStr) {
+  // dateStr is 'YYYY-MM-DD'; returns 0-11
+  return parseInt(dateStr.slice(5, 7), 10) - 1;
+}
+
+function rebuildNights(dates) {
+  const prevData = {};
+  nights.forEach(n => { prevData[n.date] = n; });
+
+  nights = [];
+  for (let i = 0; i < dates.length - 1; i++) {
+    const date = dates[i];
+    const nextDate = dates[i + 1];
+    const prev = prevData[date];
+    nights.push({
+      date,
+      nextDate,
+      included: prev ? prev.included : true,
+    });
+  }
+  renderNightsTable();
+}
+
+function nightRate(night) {
+  if (manualLodgingRate !== null && currentLodging === STANDARD_LODGING) return manualLodgingRate;
+  if (!currentLodging) return 0;
+  return currentLodging[monthIndexOf(night.date)];
+}
+
+function calcLodgingTotal() {
+  let total = 0;
+  nights.forEach(n => { if (n.included) total += nightRate(n); });
+  return total;
+}
+
+function formatShortDate(d) {
+  const [y, m, day] = d.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[parseInt(m)-1]} ${parseInt(day)}`;
+}
+
+function renderNightsTable() {
+  const tbody = document.getElementById('nightsTableBody');
+  const table = document.getElementById('nightsTable');
+  const noNightsNote = document.getElementById('noNightsNote');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (nights.length === 0) {
+    table.style.display = 'none';
+    noNightsNote.style.display = '';
+    return;
+  }
+  table.style.display = '';
+  noNightsNote.style.display = 'none';
+
+  nights.forEach((night, idx) => {
+    const tr = document.createElement('tr');
+
+    const tdNight = document.createElement('td');
+    tdNight.className = 'date-cell';
+    tdNight.innerHTML = `${formatShortDate(night.date)} → ${formatShortDate(night.nextDate)}`;
+    tr.appendChild(tdNight);
+
+    const rate = nightRate(night);
+    const tdCap = document.createElement('td');
+    tdCap.innerHTML = `<label class="meal-check ${night.included ? 'checked' : ''}">
+      <input type="checkbox" ${night.included ? 'checked' : ''} onchange="setNightIncluded(${idx}, this.checked)">
+      ${fmt(rate)}/night
+    </label>`;
+    tr.appendChild(tdCap);
+
+    const tdAmt = document.createElement('td');
+    tdAmt.className = 'amount-cell';
+    tdAmt.textContent = night.included ? fmt(rate) : fmt(0);
+    if (!night.included) tdAmt.classList.add('zero');
+    tr.appendChild(tdAmt);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function setNightIncluded(idx, checked) {
+  nights[idx].included = checked;
+  renderNightsTable();
+  calcTotals();
 }
 
 function toggleNotesprint() {
@@ -1286,16 +1499,23 @@ function resetForm() {
   document.getElementById('locationPreset').value = '';
   document.getElementById('otherCity').value = '';
   document.getElementById('manualRate').value = '';
+  document.getElementById('manualLodgingRate').value = '';
   document.getElementById('otherCityField').style.display = 'none';
   document.getElementById('manualRateField').style.display = 'none';
   document.getElementById('rateDisplay').style.display = 'none';
   document.getElementById('lookupNote').style.display = 'none';
   document.getElementById('dailySection').style.display = 'none';
+  document.getElementById('lodgingSection').style.display = 'none';
   document.getElementById('totalsSection').style.display = 'none';
   document.getElementById('printBtn').style.display = 'none';
   document.getElementById('printNote').style.display = 'none';
+  document.querySelector('input[name="lodgingMode"][value="separate"]').checked = true;
+  setLodgingMode('separate');
   currentMIE = 0;
+  currentLodging = STANDARD_LODGING;
+  manualLodgingRate = null;
   days = [];
+  nights = [];
 }
 </script>
 </body>
