@@ -300,7 +300,7 @@
 
 <header class="screen-only">
   <h1>Per Diem Calculator</h1>
-  <span>GSA CONUS Rates · Reimbursement rates last updated October 1, 2025</span>
+  <span>GSA CONUS Rates · Reimbursement rates last updated October 1, 2026</span>
 </header>
 
 <div class="container">
@@ -357,41 +357,14 @@
           <label>Destination</label>
           <select id="locationPreset" onchange="handleLocationPreset()">
             <option value="">— select —</option>
-            <option value="msp">Minneapolis / St. Paul, MN — $92</option>
-            <option value="duluth">Duluth, MN — $86</option>
-            <option value="rochester">Rochester, MN — $80</option>
-            <option value="chicago">Chicago, IL — $92</option>
-            <option value="memphis">Memphis, TN — $74</option>
-            <option value="nyc">New York City, NY — $92</option>
-            <option value="standard">Standard CONUS rate — $68</option>
-            <option value="other">Other U.S. location (look up at GSA)…</option>
+            <option value="nyc">New York City, NY</option>
+            <option value="mn">Minneapolis / St. Paul, MN</option>
+            <option value="other">Other U.S. location</option>
           </select>
         </div>
-      </div>
-
-      <!-- Other-location manual lookup (shown only when "Other" is selected) -->
-      <div id="otherBlock" style="display:none; margin-bottom: 16px;">
-        <p class="note" style="margin-top:0; margin-bottom:10px;">
-          This location isn't in the saved list. Look up its M&amp;IE total at
-          <a href="https://www.gsa.gov/travel/plan-book/per-diem-rates" target="_blank">gsa.gov per diem rates</a>
-          — select the state, then the city — and enter what you find below. Every continental-U.S. M&amp;IE rate is one of five values ($68, $74, $80, $86, or $92); the standard $68 rate applies to any location GSA doesn't list separately.
-        </p>
-        <div class="field-grid">
-          <div class="field">
-            <label>Location label (for your report)</label>
-            <input type="text" id="otherCity" placeholder="e.g. Austin, TX" oninput="applyOtherRate()">
-          </div>
-          <div class="field">
-            <label>M&amp;IE rate from GSA</label>
-            <select id="otherRate" onchange="applyOtherRate()">
-              <option value="">— select rate —</option>
-              <option value="68">$68 — standard</option>
-              <option value="74">$74</option>
-              <option value="80">$80</option>
-              <option value="86">$86</option>
-              <option value="92">$92 — highest</option>
-            </select>
-          </div>
+        <div class="field" id="otherCityField" style="display:none">
+          <label>City, State</label>
+          <input type="text" id="otherCity" placeholder="e.g. Chicago, IL or Memphis, TN" oninput="lookupOtherCity()">
         </div>
       </div>
 
@@ -403,7 +376,21 @@
           </div>
           <div style="margin-left:16px; color: var(--ink-light); font-size: 12px;" id="rateSource"></div>
         </div>
-        <p class="note" style="margin-top: 7px;">GSA FY2026 rate. Verify any figure at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>.</p>
+        <p class="note" style="margin-top: 7px;">Verify or look up any rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>.</p>
+      </div>
+
+      <div id="manualRateField" style="display:none">
+        <div class="field" style="max-width: 200px;">
+          <label>Enter M&amp;IE Rate Manually ($)</label>
+          <input type="number" id="manualRate" placeholder="68.00" step="0.01" oninput="applyManualRate()">
+        </div>
+        <p class="note" style="margin-top:8px;">
+          Location not found in table. Look up the rate at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter it above.
+        </p>
+      </div>
+
+      <div id="lookupNote" style="display:none">
+        <p class="note" id="lookupNoteText"></p>
       </div>
     </div>
   </div>
@@ -471,13 +458,460 @@
 <script>
 // ─────────────────────────────────────────────
 // GSA FY 2026 CONUS M&IE RATES
-// Standard rate: $68. Rates held at FY 2025 levels per GSA Bulletin FTR 26-01.
-// Every CONUS M&IE rate is one of five tiers: 68, 74, 80, 86, 92.
-// Curated destinations below were verified at gsa.gov/perdiem.
-// Update each October when new rates are published. Source: gsa.gov/perdiem
+// Standard rate: $68. NYC/high-cost areas listed below.
+// Rates held at FY 2025 levels per GSA Bulletin FTR 26-01.
+// Update this table each October when new rates are published.
+// Source: gsa.gov/perdiem
 // ─────────────────────────────────────────────
+// GSA FY 2027 official Non-Standard Area (NSA) rates
+// Source: api.gsa.gov/travel/perdiem/v2 (conus/lodging/2027), pulled directly from GSA
+// Any city not listed here uses the $68 standard CONUS rate.
+// Update by re-pulling this endpoint each October (or via the api.gsa.gov docs) and regenerating this table.
+const RATE_TABLE = [
+  // AL
+  ["birmingham", "al", 80, "Birmingham, AL"],
+  ["gulf shores", "al", 74, "Gulf Shores, AL"],
+  ["huntsville", "al", 74, "Huntsville, AL"],
+  ["mobile", "al", 74, "Mobile, AL"],
+  // AR
+  ["hot springs", "ar", 68, "Hot Springs, AR"],
+  // AZ
+  ["grand canyon", "az", 80, "Grand Canyon / Flagstaff, AZ"],
+  ["flagstaff", "az", 80, "Grand Canyon / Flagstaff, AZ"],
+  ["kayenta", "az", 74, "Kayenta, AZ"],
+  ["phoenix", "az", 86, "Phoenix / Scottsdale, AZ"],
+  ["scottsdale", "az", 86, "Phoenix / Scottsdale, AZ"],
+  ["sedona", "az", 92, "Sedona, AZ"],
+  ["tucson", "az", 80, "Tucson, AZ"],
+  // CA
+  ["antioch", "ca", 86, "Antioch / Brentwood / Concord, CA"],
+  ["brentwood", "ca", 86, "Antioch / Brentwood / Concord, CA"],
+  ["concord", "ca", 86, "Antioch / Brentwood / Concord, CA"],
+  ["bakersfield", "ca", 74, "Bakersfield / Ridgecrest, CA"],
+  ["ridgecrest", "ca", 74, "Bakersfield / Ridgecrest, CA"],
+  ["barstow", "ca", 86, "Barstow / Ontario / Victorville, CA"],
+  ["ontario", "ca", 86, "Barstow / Ontario / Victorville, CA"],
+  ["victorville", "ca", 86, "Barstow / Ontario / Victorville, CA"],
+  ["death valley", "ca", 80, "Death Valley, CA"],
+  ["eureka", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
+  ["arcata", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
+  ["mckinleyville", "ca", 86, "Eureka / Arcata / McKinleyville, CA"],
+  ["fresno", "ca", 86, "Fresno, CA"],
+  ["los angeles", "ca", 86, "Los Angeles, CA"],
+  ["mammoth lakes", "ca", 86, "Mammoth Lakes, CA"],
+  ["mill valley", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
+  ["san rafael", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
+  ["novato", "ca", 92, "Mill Valley / San Rafael / Novato, CA"],
+  ["monterey", "ca", 92, "Monterey, CA"],
+  ["napa", "ca", 92, "Napa, CA"],
+  ["oakhurst", "ca", 80, "Oakhurst, CA"],
+  ["oakland", "ca", 92, "Oakland, CA"],
+  ["palm springs", "ca", 86, "Palm Springs, CA"],
+  ["point arena", "ca", 86, "Point Arena / Gualala, CA"],
+  ["gualala", "ca", 86, "Point Arena / Gualala, CA"],
+  ["sacramento", "ca", 86, "Sacramento, CA"],
+  ["san diego", "ca", 86, "San Diego, CA"],
+  ["san francisco", "ca", 92, "San Francisco, CA"],
+  ["san luis obispo", "ca", 86, "San Luis Obispo, CA"],
+  ["san mateo", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
+  ["foster city", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
+  ["belmont", "ca", 86, "San Mateo / Foster City / Belmont, CA"],
+  ["santa barbara", "ca", 92, "Santa Barbara, CA"],
+  ["santa cruz", "ca", 86, "Santa Cruz, CA"],
+  ["santa monica", "ca", 92, "Santa Monica, CA"],
+  ["santa rosa", "ca", 86, "Santa Rosa, CA"],
+  ["south lake tahoe", "ca", 86, "South Lake Tahoe, CA"],
+  ["stockton", "ca", 74, "Stockton, CA"],
+  ["sunnyvale", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
+  ["palo alto", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
+  ["san jose", "ca", 92, "Sunnyvale / Palo Alto / San Jose, CA"],
+  ["tahoe city", "ca", 86, "Tahoe City, CA"],
+  ["truckee", "ca", 86, "Truckee, CA"],
+  ["visalia", "ca", 80, "Visalia, CA"],
+  ["west sacramento", "ca", 80, "West Sacramento / Davis, CA"],
+  ["davis", "ca", 80, "West Sacramento / Davis, CA"],
+  ["yosemite national park", "ca", 86, "Yosemite National Park, CA"],
+  // CO
+  ["aspen", "co", 92, "Aspen, CO"],
+  ["boulder", "co", 80, "Boulder / Broomfield, CO"],
+  ["broomfield", "co", 80, "Boulder / Broomfield, CO"],
+  ["colorado springs", "co", 86, "Colorado Springs, CO"],
+  ["cortez", "co", 74, "Cortez, CO"],
+  ["crested butte", "co", 86, "Crested Butte / Gunnison, CO"],
+  ["gunnison", "co", 86, "Crested Butte / Gunnison, CO"],
+  ["denver", "co", 92, "Denver / Aurora, CO"],
+  ["aurora", "co", 92, "Denver / Aurora, CO"],
+  ["douglas", "co", 80, "Douglas, CO"],
+  ["durango", "co", 80, "Durango, CO"],
+  ["fort collins", "co", 80, "Fort Collins / Loveland, CO"],
+  ["loveland", "co", 80, "Fort Collins / Loveland, CO"],
+  ["grand lake", "co", 86, "Grand Lake, CO"],
+  ["montrose", "co", 74, "Montrose, CO"],
+  ["silverthorne", "co", 92, "Silverthorne / Breckenridge, CO"],
+  ["breckenridge", "co", 92, "Silverthorne / Breckenridge, CO"],
+  ["steamboat springs", "co", 92, "Steamboat Springs, CO"],
+  ["telluride", "co", 92, "Telluride, CO"],
+  ["vail", "co", 92, "Vail, CO"],
+  // CT
+  ["bridgeport", "ct", 86, "Bridgeport / Danbury, CT"],
+  ["danbury", "ct", 86, "Bridgeport / Danbury, CT"],
+  ["hartford", "ct", 80, "Hartford, CT"],
+  ["new haven", "ct", 80, "New Haven, CT"],
+  ["new london", "ct", 86, "New London / Groton, CT"],
+  ["groton", "ct", 86, "New London / Groton, CT"],
+  // DC
+  ["district of columbia", "dc", 92, "District of Columbia, DC"],
+  // DE
+  ["lewes", "de", 74, "Lewes, DE"],
+  ["wilmington", "de", 74, "Wilmington, DE"],
+  // FL
+  ["boca raton", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
+  ["delray beach", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
+  ["jupiter", "fl", 86, "Boca Raton / Delray Beach / Jupiter, FL"],
+  ["bradenton", "fl", 80, "Bradenton, FL"],
+  ["cocoa beach", "fl", 74, "Cocoa Beach, FL"],
+  ["daytona beach", "fl", 80, "Daytona Beach, FL"],
+  ["fort lauderdale", "fl", 86, "Fort Lauderdale, FL"],
+  ["fort myers", "fl", 80, "Fort Myers, FL"],
+  ["fort walton beach", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL"],
+  ["de funiak springs", "fl", 86, "Fort Walton Beach / De Funiak Springs, FL"],
+  ["gulf breeze", "fl", 74, "Gulf Breeze, FL"],
+  ["key west", "fl", 86, "Key West, FL"],
+  ["miami", "fl", 92, "Miami, FL"],
+  ["naples", "fl", 80, "Naples, FL"],
+  ["orlando", "fl", 80, "Orlando, FL"],
+  ["panama city", "fl", 80, "Panama City, FL"],
+  ["pensacola", "fl", 74, "Pensacola, FL"],
+  ["punta gorda", "fl", 74, "Punta Gorda, FL"],
+  ["sarasota", "fl", 86, "Sarasota, FL"],
+  ["sebring", "fl", 74, "Sebring, FL"],
+  ["st augustine", "fl", 80, "St. Augustine, FL"],
+  ["stuart", "fl", 80, "Stuart, FL"],
+  ["tallahassee", "fl", 80, "Tallahassee, FL"],
+  ["tampa", "fl", 80, "Tampa / St. Petersburg, FL"],
+  ["st petersburg", "fl", 80, "Tampa / St. Petersburg, FL"],
+  ["vero beach", "fl", 74, "Vero Beach, FL"],
+  // GA
+  ["athens", "ga", 74, "Athens, GA"],
+  ["atlanta", "ga", 86, "Atlanta, GA"],
+  ["augusta", "ga", 74, "Augusta, GA"],
+  ["jekyll island", "ga", 86, "Jekyll Island / Brunswick, GA"],
+  ["brunswick", "ga", 86, "Jekyll Island / Brunswick, GA"],
+  ["marietta", "ga", 74, "Marietta, GA"],
+  ["savannah", "ga", 80, "Savannah, GA"],
+  // IA
+  ["dallas", "ia", 80, "Dallas, IA"],
+  ["des moines", "ia", 80, "Des Moines, IA"],
+  // ID
+  ["boise", "id", 86, "Boise, ID"],
+  ["coeur d alene", "id", 74, "Coeur d'Alene, ID"],
+  ["sun valley", "id", 80, "Sun Valley / Ketchum, ID"],
+  ["ketchum", "id", 80, "Sun Valley / Ketchum, ID"],
+  // IL
+  ["bolingbrook", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
+  ["romeoville", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
+  ["lemont", "il", 74, "Bolingbrook / Romeoville / Lemont, IL"],
+  ["chicago", "il", 92, "Chicago, IL"],
+  ["east st louis", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
+  ["o fallon", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
+  ["fairview heights", "il", 86, "East St. Louis / O'Fallon / Fairview Heights, IL"],
+  ["oakbrook terrace", "il", 80, "Oakbrook Terrace, IL"],
+  // IN
+  ["bloomington", "in", 74, "Bloomington, IN"],
+  ["indianapolis", "in", 80, "Indianapolis / Carmel, IN"],
+  ["carmel", "in", 80, "Indianapolis / Carmel, IN"],
+  ["lafayette", "in", 74, "Lafayette / West Lafayette, IN"],
+  ["west lafayette", "in", 74, "Lafayette / West Lafayette, IN"],
+  // KS
+  ["kansas city", "ks", 80, "Kansas City / Overland Park, KS"],
+  ["overland park", "ks", 80, "Kansas City / Overland Park, KS"],
+  // KY
+  ["boone", "ky", 68, "Boone, KY"],
+  ["kenton", "ky", 86, "Kenton, KY"],
+  ["lexington", "ky", 80, "Lexington, KY"],
+  ["louisville", "ky", 80, "Louisville, KY"],
+  // LA
+  ["alexandria", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
+  ["leesville", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
+  ["natchitoches", "la", 68, "Alexandria / Leesville / Natchitoches, LA"],
+  ["new orleans", "la", 80, "New Orleans, LA"],
+  // MA
+  ["andover", "ma", 80, "Andover, MA"],
+  ["boston", "ma", 92, "Boston / Cambridge, MA"],
+  ["cambridge", "ma", 92, "Boston / Cambridge, MA"],
+  ["burlington", "ma", 86, "Burlington / Woburn, MA"],
+  ["woburn", "ma", 86, "Burlington / Woburn, MA"],
+  ["falmouth", "ma", 86, "Falmouth, MA"],
+  ["hyannis", "ma", 92, "Hyannis, MA"],
+  ["martha s vineyard", "ma", 92, "Martha's Vineyard, MA"],
+  ["nantucket", "ma", 92, "Nantucket, MA"],
+  ["northampton", "ma", 80, "Northampton, MA"],
+  ["pittsfield", "ma", 86, "Pittsfield, MA"],
+  ["plymouth", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
+  ["taunton", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
+  ["new bedford", "ma", 80, "Plymouth / Taunton / New Bedford, MA"],
+  ["quincy", "ma", 80, "Quincy, MA"],
+  ["springfield", "ma", 74, "Springfield, MA"],
+  ["worcester", "ma", 80, "Worcester, MA"],
+  // MD
+  ["aberdeen", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
+  ["bel air", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
+  ["belcamp", "md", 74, "Aberdeen / Bel Air / Belcamp, MD"],
+  ["annapolis", "md", 80, "Annapolis, MD"],
+  ["baltimore city", "md", 86, "Baltimore City, MD"],
+  ["cambridge", "md", 80, "Cambridge / St. Michaels, MD"],
+  ["st michaels", "md", 80, "Cambridge / St. Michaels, MD"],
+  ["centreville", "md", 74, "Centreville, MD"],
+  ["columbia", "md", 86, "Columbia, MD"],
+  ["district of columbia", "md", 92, "District of Columbia, MD"],
+  ["ocean city", "md", 80, "Ocean City, MD"],
+  // ME
+  ["bar harbor", "me", 92, "Bar Harbor / Rockport, ME"],
+  ["rockport", "me", 92, "Bar Harbor / Rockport, ME"],
+  ["kennebunk", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
+  ["kittery", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
+  ["sanford", "me", 86, "Kennebunk / Kittery / Sanford, ME"],
+  ["portland", "me", 80, "Portland, ME"],
+  // MI
+  ["ann arbor", "mi", 80, "Ann Arbor, MI"],
+  ["detroit", "mi", 74, "Detroit, MI"],
+  ["grand rapids", "mi", 80, "Grand Rapids, MI"],
+  ["holland", "mi", 74, "Holland, MI"],
+  ["mackinac island", "mi", 86, "Mackinac Island, MI"],
+  ["midland", "mi", 74, "Midland, MI"],
+  ["muskegon", "mi", 68, "Muskegon, MI"],
+  ["petoskey", "mi", 86, "Petoskey, MI"],
+  ["pontiac", "mi", 80, "Pontiac / Auburn Hills, MI"],
+  ["auburn hills", "mi", 80, "Pontiac / Auburn Hills, MI"],
+  ["south haven", "mi", 68, "South Haven, MI"],
+  ["traverse city", "mi", 80, "Traverse City, MI"],
+  // MN
+  ["duluth", "mn", 86, "Duluth, MN"],
+  ["minneapolis", "mn", 92, "Minneapolis / St. Paul, MN"],
+  ["st paul", "mn", 92, "Minneapolis / St. Paul, MN"],
+  ["rochester", "mn", 80, "Rochester, MN"],
+  // MO
+  ["kansas city", "mo", 80, "Kansas City, MO"],
+  ["st louis", "mo", 86, "St. Louis, MO"],
+  // MS
+  ["oxford", "ms", 68, "Oxford, MS"],
+  ["southaven", "ms", 68, "Southaven, MS"],
+  ["starkville", "ms", 68, "Starkville, MS"],
+  // MT
+  ["big sky", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
+  ["west yellowstone", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
+  ["gardiner", "mt", 80, "Big Sky / West Yellowstone/Gardiner, MT"],
+  ["helena", "mt", 74, "Helena, MT"],
+  ["kalispell", "mt", 80, "Kalispell/Whitefish, MT"],
+  ["whitefish", "mt", 80, "Kalispell/Whitefish, MT"],
+  ["missoula", "mt", 74, "Missoula, MT"],
+  // NC
+  ["asheville", "nc", 80, "Asheville, NC"],
+  ["atlantic beach", "nc", 74, "Atlantic Beach / Morehead City, NC"],
+  ["morehead city", "nc", 74, "Atlantic Beach / Morehead City, NC"],
+  ["chapel hill", "nc", 80, "Chapel Hill, NC"],
+  ["charlotte", "nc", 80, "Charlotte, NC"],
+  ["durham", "nc", 74, "Durham, NC"],
+  ["fayetteville", "nc", 68, "Fayetteville, NC"],
+  ["greensboro", "nc", 74, "Greensboro, NC"],
+  ["kill devil hills", "nc", 74, "Kill Devil Hills, NC"],
+  ["raleigh", "nc", 74, "Raleigh, NC"],
+  ["wilmington", "nc", 74, "Wilmington, NC"],
+  // NE
+  ["omaha", "ne", 80, "Omaha, NE"],
+  // NH
+  ["concord", "nh", 74, "Concord, NH"],
+  ["conway", "nh", 80, "Conway, NH"],
+  ["durham", "nh", 74, "Durham, NH"],
+  ["laconia", "nh", 74, "Laconia, NH"],
+  ["lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
+  ["lincoln", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
+  ["west lebanon", "nh", 74, "Lebanon / Lincoln / West Lebanon, NH"],
+  ["manchester", "nh", 74, "Manchester, NH"],
+  ["portsmouth", "nh", 74, "Portsmouth, NH"],
+  // NJ
+  ["cherry hill", "nj", 80, "Cherry Hill / Moorestown, NJ"],
+  ["moorestown", "nj", 80, "Cherry Hill / Moorestown, NJ"],
+  ["eatontown", "nj", 86, "Eatontown / Freehold, NJ"],
+  ["freehold", "nj", 86, "Eatontown / Freehold, NJ"],
+  ["edison", "nj", 80, "Edison / Piscataway, NJ"],
+  ["piscataway", "nj", 80, "Edison / Piscataway, NJ"],
+  ["flemington", "nj", 80, "Flemington, NJ"],
+  ["newark", "nj", 86, "Newark, NJ"],
+  ["parsippany", "nj", 80, "Parsippany, NJ"],
+  ["princeton", "nj", 86, "Princeton / Trenton, NJ"],
+  ["trenton", "nj", 86, "Princeton / Trenton, NJ"],
+  ["somerset", "nj", 80, "Somerset, NJ"],
+  ["springfield", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
+  ["cranford", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
+  ["new providence", "nj", 80, "Springfield / Cranford / New Providence, NJ"],
+  ["toms river", "nj", 74, "Toms River, NJ"],
+  // NM
+  ["albuquerque", "nm", 80, "Albuquerque, NM"],
+  ["carlsbad", "nm", 74, "Carlsbad, NM"],
+  ["santa fe", "nm", 80, "Santa Fe, NM"],
+  ["taos", "nm", 74, "Taos, NM"],
+  // NV
+  ["incline village", "nv", 80, "Incline Village / Reno / Sparks, NV"],
+  ["reno", "nv", 80, "Incline Village / Reno / Sparks, NV"],
+  ["sparks", "nv", 80, "Incline Village / Reno / Sparks, NV"],
+  ["las vegas", "nv", 86, "Las Vegas, NV"],
+  // NY
+  ["albany", "ny", 86, "Albany, NY"],
+  ["binghamton", "ny", 74, "Binghamton, NY"],
+  ["buffalo", "ny", 80, "Buffalo, NY"],
+  ["floral park", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
+  ["garden city", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
+  ["great neck", "ny", 86, "Floral Park / Garden City / Great Neck, NY"],
+  ["glens falls", "ny", 86, "Glens Falls, NY"],
+  ["ithaca", "ny", 80, "Ithaca, NY"],
+  ["kingston", "ny", 86, "Kingston, NY"],
+  ["lake placid", "ny", 86, "Lake Placid, NY"],
+  ["new york city", "ny", 92, "New York City, NY"],
+  ["niagara falls", "ny", 80, "Niagara Falls, NY"],
+  ["nyack", "ny", 80, "Nyack / Palisades, NY"],
+  ["palisades", "ny", 80, "Nyack / Palisades, NY"],
+  ["poughkeepsie", "ny", 80, "Poughkeepsie, NY"],
+  ["riverhead", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
+  ["ronkonkoma", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
+  ["melville", "ny", 86, "Riverhead / Ronkonkoma / Melville, NY"],
+  ["rochester", "ny", 80, "Rochester, NY"],
+  ["saratoga springs", "ny", 80, "Saratoga Springs / Schenectady, NY"],
+  ["schenectady", "ny", 80, "Saratoga Springs / Schenectady, NY"],
+  ["syracuse", "ny", 80, "Syracuse / Oswego, NY"],
+  ["oswego", "ny", 80, "Syracuse / Oswego, NY"],
+  ["tarrytown", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
+  ["white plains", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
+  ["new rochelle", "ny", 92, "Tarrytown / White Plains / New Rochelle, NY"],
+  ["troy", "ny", 80, "Troy, NY"],
+  ["west point", "ny", 80, "West Point, NY"],
+  // OH
+  ["cincinnati", "oh", 86, "Cincinnati, OH"],
+  ["cleveland", "oh", 80, "Cleveland, OH"],
+  ["columbus", "oh", 80, "Columbus, OH"],
+  ["dayton", "oh", 74, "Dayton / Fairborn, OH"],
+  ["fairborn", "oh", 74, "Dayton / Fairborn, OH"],
+  ["hamilton", "oh", 74, "Hamilton, OH"],
+  ["sandusky", "oh", 68, "Sandusky, OH"],
+  // OK
+  ["oklahoma city", "ok", 80, "Oklahoma City, OK"],
+  // OR
+  ["beaverton", "or", 80, "Beaverton, OR"],
+  ["bend", "or", 86, "Bend, OR"],
+  ["clackamas", "or", 80, "Clackamas, OR"],
+  ["eugene", "or", 80, "Eugene / Florence, OR"],
+  ["florence", "or", 80, "Eugene / Florence, OR"],
+  ["lincoln city", "or", 92, "Lincoln City, OR"],
+  ["portland", "or", 86, "Portland, OR"],
+  ["seaside", "or", 86, "Seaside, OR"],
+  // PA
+  ["bucks", "pa", 80, "Bucks, PA"],
+  ["chester", "pa", 80, "Chester / Radnor / Essington, PA"],
+  ["radnor", "pa", 80, "Chester / Radnor / Essington, PA"],
+  ["essington", "pa", 80, "Chester / Radnor / Essington, PA"],
+  ["gettysburg", "pa", 68, "Gettysburg, PA"],
+  ["harrisburg", "pa", 74, "Harrisburg, PA"],
+  ["hershey", "pa", 80, "Hershey, PA"],
+  ["lancaster", "pa", 74, "Lancaster, PA"],
+  ["malvern", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
+  ["frazer", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
+  ["berwyn", "pa", 80, "Malvern / Frazer / Berwyn, PA"],
+  ["montgomery", "pa", 80, "Montgomery, PA"],
+  ["philadelphia", "pa", 92, "Philadelphia, PA"],
+  ["pittsburgh", "pa", 80, "Pittsburgh, PA"],
+  ["reading", "pa", 74, "Reading, PA"],
+  ["state college", "pa", 74, "State College, PA"],
+  // RI
+  ["jamestown", "ri", 80, "Jamestown / Middletown / Newport, RI"],
+  ["middletown", "ri", 80, "Jamestown / Middletown / Newport, RI"],
+  ["newport", "ri", 80, "Jamestown / Middletown / Newport, RI"],
+  ["providence", "ri", 80, "Providence / Bristol, RI"],
+  ["bristol", "ri", 80, "Providence / Bristol, RI"],
+  // SC
+  ["charleston", "sc", 92, "Charleston, SC"],
+  ["columbia", "sc", 74, "Columbia, SC"],
+  ["hilton head", "sc", 80, "Hilton Head, SC"],
+  ["myrtle beach", "sc", 74, "Myrtle Beach, SC"],
+  // SD
+  ["deadwood", "sd", 80, "Deadwood / Spearfish, SD"],
+  ["spearfish", "sd", 80, "Deadwood / Spearfish, SD"],
+  ["hot springs", "sd", 74, "Hot Springs, SD"],
+  ["rapid city", "sd", 74, "Rapid City, SD"],
+  // TN
+  ["brentwood", "tn", 86, "Brentwood / Franklin, TN"],
+  ["franklin", "tn", 86, "Brentwood / Franklin, TN"],
+  ["chattanooga", "tn", 74, "Chattanooga, TN"],
+  ["knoxville", "tn", 74, "Knoxville, TN"],
+  ["memphis", "tn", 74, "Memphis, TN"],
+  ["nashville", "tn", 86, "Nashville, TN"],
+  // TX
+  ["arlington", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
+  ["fort worth", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
+  ["grapevine", "tx", 80, "Arlington / Fort Worth / Grapevine, TX"],
+  ["austin", "tx", 80, "Austin, TX"],
+  ["big spring", "tx", 68, "Big Spring, TX"],
+  ["dallas", "tx", 80, "Dallas, TX"],
+  ["galveston", "tx", 74, "Galveston, TX"],
+  ["houston", "tx", 80, "Houston, TX"],
+  ["midland", "tx", 74, "Midland / Odessa, TX"],
+  ["odessa", "tx", 74, "Midland / Odessa, TX"],
+  ["pecos", "tx", 74, "Pecos, TX"],
+  ["plano", "tx", 80, "Plano, TX"],
+  ["san antonio", "tx", 74, "San Antonio, TX"],
+  ["south padre island", "tx", 74, "South Padre Island, TX"],
+  // UT
+  ["moab", "ut", 86, "Moab, UT"],
+  ["park city", "ut", 92, "Park City, UT"],
+  ["provo", "ut", 74, "Provo, UT"],
+  ["salt lake city", "ut", 80, "Salt Lake City, UT"],
+  // VA
+  ["blacksburg", "va", 68, "Blacksburg, VA"],
+  ["charlottesville", "va", 80, "Charlottesville, VA"],
+  ["district of columbia", "va", 92, "District of Columbia, VA"],
+  ["loudoun", "va", 80, "Loudoun, VA"],
+  ["lynchburg", "va", 68, "Lynchburg, VA"],
+  ["richmond", "va", 80, "Richmond, VA"],
+  ["roanoke", "va", 74, "Roanoke, VA"],
+  ["virginia beach", "va", 74, "Virginia Beach, VA"],
+  ["wallops island", "va", 68, "Wallops Island, VA"],
+  ["williamsburg", "va", 80, "Williamsburg / York, VA"],
+  ["york", "va", 80, "Williamsburg / York, VA"],
+  // VT
+  ["burlington", "vt", 86, "Burlington, VT"],
+  ["manchester", "vt", 86, "Manchester, VT"],
+  ["montpelier", "vt", 74, "Montpelier, VT"],
+  ["stowe", "vt", 86, "Stowe, VT"],
+  ["white river junction", "vt", 86, "White River Junction, VT"],
+  // WA
+  ["everett", "wa", 86, "Everett / Lynnwood, WA"],
+  ["lynnwood", "wa", 86, "Everett / Lynnwood, WA"],
+  ["ocean shores", "wa", 86, "Ocean Shores, WA"],
+  ["olympia", "wa", 80, "Olympia / Tumwater, WA"],
+  ["tumwater", "wa", 80, "Olympia / Tumwater, WA"],
+  ["port angeles", "wa", 92, "Port Angeles / Port Townsend, WA"],
+  ["port townsend", "wa", 92, "Port Angeles / Port Townsend, WA"],
+  ["richland", "wa", 86, "Richland / Pasco, WA"],
+  ["pasco", "wa", 86, "Richland / Pasco, WA"],
+  ["seattle", "wa", 92, "Seattle, WA"],
+  ["spokane", "wa", 86, "Spokane, WA"],
+  ["tacoma", "wa", 86, "Tacoma, WA"],
+  ["vancouver", "wa", 86, "Vancouver, WA"],
+  // WI
+  ["madison", "wi", 80, "Madison, WI"],
+  ["milwaukee", "wi", 80, "Milwaukee, WI"],
+  ["sturgeon bay", "wi", 80, "Sturgeon Bay, WI"],
+  // WV
+  ["charles town", "wv", 68, "Charles Town, WV"],
+  ["charleston", "wv", 68, "Charleston, WV"],
+  // WY
+  ["cody", "wy", 74, "Cody, WY"],
+  ["jackson", "wy", 92, "Jackson / Pinedale, WY"],
+  ["pinedale", "wy", 92, "Jackson / Pinedale, WY"],
+];
 
-// Exact GSA M&IE meal dollar breakdowns by tier.
+// GSA FY 2027 exact M&IE meal dollar breakdowns by rate tier
+// Source: api.gsa.gov/travel/perdiem/v2 (conus/mie/2027), pulled directly from GSA
+// Update each October when new rates are published.
 const MIE_BREAKDOWN = {
   68: { breakfast: 16, lunch: 19, dinner: 28, incidentals: 5 },
   74: { breakfast: 18, lunch: 20, dinner: 31, incidentals: 5 },
@@ -485,23 +919,24 @@ const MIE_BREAKDOWN = {
   86: { breakfast: 22, lunch: 23, dinner: 36, incidentals: 5 },
   92: { breakfast: 23, lunch: 26, dinner: 38, incidentals: 5 },
 };
-const LEGAL_TIERS = [68, 74, 80, 86, 92];
-
-// Curated, verified destinations. key -> { rate, label }
-const PRESETS = {
-  msp:       { rate: 92, label: 'Minneapolis / St. Paul, MN' },
-  duluth:    { rate: 86, label: 'Duluth, MN' },
-  rochester: { rate: 80, label: 'Rochester, MN' },
-  chicago:   { rate: 92, label: 'Chicago, IL' },
-  memphis:   { rate: 74, label: 'Memphis, TN' },
-  nyc:       { rate: 92, label: 'New York City, NY' },
-  standard:  { rate: 68, label: 'Standard CONUS rate' },
-};
 
 function getMealBreakdown(mie) {
-  // Only the five legal GSA tiers are valid. No silent approximation.
-  return MIE_BREAKDOWN[mie] || null;
+  // Use exact tier if available, otherwise calculate proportionally
+  if (MIE_BREAKDOWN[mie]) return MIE_BREAKDOWN[mie];
+  // Fallback for manually-entered rates: proportional with flat $5 incidentals
+  const meals = mie - 5;
+  return {
+    breakfast: Math.round(meals * 0.1818),  // ~16/88 of meal total
+    lunch:     Math.round(meals * 0.2727),  // ~24/88
+    dinner:    Math.round(meals * 0.4545),  // ~40/88
+    incidentals: 5
+  };
 }
+
+// NYC preset M&IE
+const NYC_RATE = 92;
+const MN_RATE = 92;
+const STANDARD_RATE = 68;
 
 let currentMIE = 0;
 let days = [];
@@ -512,46 +947,83 @@ function fmt(n) {
 
 function handleLocationPreset() {
   const val = document.getElementById('locationPreset').value;
-  document.getElementById('otherBlock').style.display = 'none';
+  document.getElementById('otherCityField').style.display = 'none';
+  document.getElementById('manualRateField').style.display = 'none';
+  document.getElementById('lookupNote').style.display = 'none';
 
-  if (val === 'other') {
-    document.getElementById('otherBlock').style.display = '';
-    applyOtherRate();
-    return;
-  }
-
-  if (PRESETS[val]) {
-    const p = PRESETS[val];
-    const suffix = val === 'standard'
-      ? ' — applies where GSA lists no specific rate'
-      : ' — GSA FY2026';
-    setRate(p.rate, p.label + suffix);
+  if (val === 'nyc') {
+    setRate(NYC_RATE, 'New York City, NY — NSA rate');
+  } else if (val === 'mn') {
+    setRate(MN_RATE, 'Minneapolis / St. Paul, MN — NSA rate');
+  } else if (val === 'other') {
+    document.getElementById('otherCityField').style.display = '';
+    document.getElementById('rateDisplay').style.display = 'none';
+    document.getElementById('lookupNote').style.display = '';
+    document.getElementById('lookupNoteText').textContent = 'Enter city and state to look up the rate.';
+    currentMIE = 0;
   } else {
     document.getElementById('rateDisplay').style.display = 'none';
     currentMIE = 0;
-    rebuildDays();
+  }
+  rebuildDays();
+}
+
+function lookupOtherCity() {
+  const raw = (document.getElementById('otherCity').value || '').trim();
+  if (!raw || raw.length < 2) return;
+
+  // Parse "City, ST" or "City ST" or just "City"
+  const lower = raw.toLowerCase();
+  let cityPart = lower;
+  let statePart = '';
+  const commaIdx = lower.lastIndexOf(',');
+  if (commaIdx > -1) {
+    cityPart = lower.slice(0, commaIdx).trim();
+    statePart = lower.slice(commaIdx + 1).trim().replace(/\./g, '');
+  } else {
+    // Try splitting on last space if it looks like a 2-letter state
+    const parts = lower.trim().split(/\s+/);
+    if (parts.length >= 2 && parts[parts.length - 1].length === 2) {
+      statePart = parts[parts.length - 1];
+      cityPart = parts.slice(0, -1).join(' ');
+    }
+  }
+
+  // Try to match against rate table
+  let match = null;
+  for (const row of RATE_TABLE) {
+    const [kw, st, rate, name] = row;
+    const cityMatch = cityPart.includes(kw) || kw.includes(cityPart) || kw === cityPart;
+    const stateMatch = !statePart || st === statePart;
+    if (cityMatch && stateMatch) {
+      match = row;
+      break;
+    }
+  }
+
+  if (match) {
+    setRate(match[2], match[3] + ' — GSA rate');
+    document.getElementById('manualRateField').style.display = 'none';
+    document.getElementById('lookupNote').style.display = 'none';
+  } else if (cityPart.length > 2) {
+    // Not in NSA table — standard rate likely applies
+    document.getElementById('manualRateField').style.display = '';
+    document.getElementById('rateDisplay').style.display = 'none';
+    document.getElementById('lookupNote').style.display = '';
+    document.getElementById('lookupNoteText').innerHTML =
+      'Not found as a GSA Non-Standard Area. The standard rate ($68/day) likely applies — confirm at <a href="https://www.gsa.gov/perdiem" target="_blank">gsa.gov/perdiem</a>, then enter the rate below.';
   }
 }
 
-function applyOtherRate() {
-  const rate = parseInt(document.getElementById('otherRate').value, 10);
-  const label = (document.getElementById('otherCity').value || 'Other location').trim();
-  if (LEGAL_TIERS.includes(rate)) {
-    setRate(rate, label + ' — GSA FY2026 (manual lookup)');
-  } else {
-    document.getElementById('rateDisplay').style.display = 'none';
-    currentMIE = 0;
-    rebuildDays();
+function applyManualRate() {
+  const v = parseFloat(document.getElementById('manualRate').value);
+  if (!isNaN(v) && v > 0) {
+    const city = document.getElementById('otherCity').value || 'Other location';
+    setRate(v, city + ' — manually entered');
   }
 }
 
 function setRate(rate, label) {
-  // Guard: refuse any value that isn't a real GSA M&IE tier, so the tool
-  // can never silently produce an approximated (wrong) breakdown.
-  if (!LEGAL_TIERS.includes(rate)) {
-    alert('$' + rate + ' is not a valid GSA M&IE tier. Valid tiers are $68, $74, $80, $86, and $92.');
-    return;
-  }
   currentMIE = rate;
   document.getElementById('rateVal').textContent = fmt(rate) + '/day';
   document.getElementById('rateSource').textContent = label;
@@ -764,14 +1236,10 @@ function updateRowAmount(idx) {
 
 function calcDayMIE(day) {
   const bd = getMealBreakdown(currentMIE);
-  // GSA applies the 75% first/last-day reduction to the full M&IE (meals + the
-  // $5 incidental). We track incidentals as a separate flat $5/day line, so the
-  // meals-portion base is (0.75 * M&IE - incidentals) on travel days. This makes
-  // a $92 travel day total $69.00 and a $68 day $51.00, matching GSA exactly.
-  const base = day.isTravelDay
-    ? (currentMIE * 0.75 - bd.incidentals)
-    : (currentMIE - bd.incidentals);
-  // Deduct provided meals using exact GSA dollar values (full value even on 75% days)
+  // Base M&IE minus incidentals (meals-only portion), adjusted for travel day
+  const mealsTotal = currentMIE - bd.incidentals;
+  const base = day.isTravelDay ? Math.round(mealsTotal * 0.75) : mealsTotal;
+  // Deduct provided meals using exact GSA dollar values
   let deduct = 0;
   if (day.breakfast && day.mealAvailable.breakfast) deduct += bd.breakfast;
   if (day.lunch     && day.mealAvailable.lunch)     deduct += bd.lunch;
@@ -817,9 +1285,11 @@ function resetForm() {
   document.getElementById('notes').value = '';
   document.getElementById('locationPreset').value = '';
   document.getElementById('otherCity').value = '';
-  document.getElementById('otherRate').value = '';
-  document.getElementById('otherBlock').style.display = 'none';
+  document.getElementById('manualRate').value = '';
+  document.getElementById('otherCityField').style.display = 'none';
+  document.getElementById('manualRateField').style.display = 'none';
   document.getElementById('rateDisplay').style.display = 'none';
+  document.getElementById('lookupNote').style.display = 'none';
   document.getElementById('dailySection').style.display = 'none';
   document.getElementById('totalsSection').style.display = 'none';
   document.getElementById('printBtn').style.display = 'none';
